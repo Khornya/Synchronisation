@@ -1,0 +1,7 @@
+.vs
+Synchronisation.Client/bin
+Synchronisation.Client/obj
+Synchronisation.Core/bin
+Synchronisation.Core/obj
+Synchronisation.Service/bin
+Synchronisation.Service/obj

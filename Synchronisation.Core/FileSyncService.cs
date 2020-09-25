@@ -2,18 +2,21 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Timers;
+using Timer = System.Timers.Timer;
 
 namespace Synchronisation.Core
 {
     public class FileSyncService
     {
         //TODO: fix fuite mémoire
-        //TODO: utiliser OpenFileAndWaitIfNeeded
-        //TODO: utiliser des Threads ?
+        //TODO: utiliser des Threads
         //TODO: 2-way sync
         //TODO: comparaison bit à bit des fichiers
         //TODO: sync à intervalle régulier
+        //TODO: fichier de config
+        //TODO: sync au démarrage
 
         #region Fields
 
@@ -97,6 +100,8 @@ namespace Synchronisation.Core
                     throw;
                 }
 
+                
+
                 //On crée une instance d'un watcher sur le dossier d'entrée.
                 this._Watcher = new FileSystemWatcher(this._InputFolderPath);
                 //Permet de surveiller les sous-dossiers.
@@ -134,7 +139,7 @@ namespace Synchronisation.Core
             if (this._Watcher != null && this._Watcher.EnableRaisingEvents)
             {
                 this._Watcher.EnableRaisingEvents = false;
-                //TODO : mettre en pause le timer ?
+                this._Events = new List<FileSystemEventArgs>();
                 Console.WriteLine("Service paused.");
             }
         }
@@ -147,7 +152,6 @@ namespace Synchronisation.Core
             if (this._Watcher != null && !this._Watcher.EnableRaisingEvents)
             {
                 this._Watcher.EnableRaisingEvents = true;
-                //TODO : reprendre le timer ?
                 Console.WriteLine("Service resumed.");
             }
         }
@@ -166,6 +170,7 @@ namespace Synchronisation.Core
                 this._Watcher.Error -= this.Watcher_Error;
                 this._Watcher.Dispose();
                 this._Watcher = null;
+                this._Events = new List<FileSystemEventArgs>();
                 Console.WriteLine("Service stopped");
             }
         }
@@ -186,7 +191,7 @@ namespace Synchronisation.Core
         private void Watcher_Error(object sender, ErrorEventArgs e)
         {
             this._Timer.Start();
-            //TODO: Ajouter des logs
+            Console.WriteLine($"[FileSystemWatcherError] {e.GetException()}");
         }
 
         private void Timer_Elapsed(object sender, ElapsedEventArgs e)
@@ -212,24 +217,27 @@ namespace Synchronisation.Core
             try
             {
                 //--- Created ---//
+                Console.WriteLine("----- Processing CREATED events -----");
                 listF = list.Where(x => x.ChangeType == WatcherChangeTypes.Created).ToList();
                 for (int i = 0; i < listF.Count; i++) //TODO: for each
                 {
                     destination = listF[i].FullPath.Replace(_InputFolderPath, _OutputFolderPath);
                     if (Directory.Exists(listF[i].FullPath))
                     {
+                        Console.WriteLine($"Processing directory {listF[i].FullPath}");
                         Directory.CreateDirectory(destination);
-                        FileUtils.CopyDirectoryRecursively(listF[i].FullPath, destination);
+                        FileUtils.ProcessDirectoryRecursively(listF[i].FullPath, destination, FileUtils.FileActions.Copy);
                         list.Remove(listF[i]);
                         // Remove all "Created" and "Changed" events of child folders and files from the master list
                         list = list.Where(s => (s.ChangeType == WatcherChangeTypes.Created || s.ChangeType == WatcherChangeTypes.Changed) && s.FullPath.Contains(listF[i].FullPath) == false).ToList();
                         // Update the sublist of "Created events"
                         listF = list.Where(x => x.ChangeType == WatcherChangeTypes.Created).ToList();
                         i -= 1;
-
                     }
                     else
                     {
+                        Console.WriteLine($"Processing file {listF[i].FullPath}");
+                        FileUtils.OpenFilesAndWaitIfNeeded(list[i].FullPath, destination).ForEach(filestream => filestream?.Close());
                         File.Copy(listF[i].FullPath, destination, true);
                         // Remove all "Changed" events for this file from the master list
                         list = list.Where(s => (s.ChangeType != WatcherChangeTypes.Changed && s.FullPath != listF[i].FullPath)).ToList();
@@ -241,18 +249,21 @@ namespace Synchronisation.Core
             }
             catch (Exception x)
             {
-                //TODO : Ajouter des logs
+                Console.WriteLine($"[Error] Unable to process CREATED events {x.Message}");
             }
             try
             {
                 //--- Changed ---//
+                Console.WriteLine("----- Processing CHANGED events -----");
                 listF = list.Where(z => z.ChangeType == WatcherChangeTypes.Changed).ToList();
                 listF = RemoveDuplicates(listF);
                 foreach (FileSystemEventArgs f in listF)
                 {
                     if (File.Exists(f.FullPath))
                     {
+                        Console.WriteLine($"Processing file {f.FullPath}");
                         destination = f.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
+                        FileUtils.OpenFilesAndWaitIfNeeded(f.FullPath, destination).ForEach(filestream => filestream?.Close());
                         File.Copy(f.FullPath, destination, true);
                     }
 
@@ -260,11 +271,12 @@ namespace Synchronisation.Core
             }
             catch (Exception x)
             {
-                //TODO : Ajouter des logs
+                Console.WriteLine($"[Error] Unable to process CHANGED events {x.Message}");
             }
             try
             {
                 //--- Renamed ---//
+                Console.WriteLine("----- Processing RENAMED events -----");
                 listF = list.Where(x => x.ChangeType == WatcherChangeTypes.Renamed).ToList();
                 foreach (RenamedEventArgs f in listF)
                 {
@@ -273,40 +285,49 @@ namespace Synchronisation.Core
                     {
                         string oldFPath = f.OldFullPath.Replace(_InputFolderPath, _OutputFolderPath);
                         string newFPath = f.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
-                        Directory.Move(oldFPath, newFPath);
+                        Console.WriteLine($"Processing directory {oldFPath}");
+                        FileUtils.ProcessDirectoryRecursively(oldFPath, newFPath, FileUtils.FileActions.Move);
+                        Directory.Delete(oldFPath);
                     }
                     else
                     {
                         string oldFPath = f.OldFullPath.Replace(_InputFolderPath, _OutputFolderPath);
                         string newFPath = f.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
+                        Console.WriteLine($"Processing file {oldFPath}");
+                        FileUtils.OpenFilesAndWaitIfNeeded(oldFPath).ForEach(filestream => filestream?.Close());
                         File.Move(oldFPath, newFPath);
                     }
                 }
             }
             catch (Exception x)
             {
-                //TODO : Ajouter des logs
+                Console.WriteLine($"[Error] Unable to process RENAMED events {x.Message}");
             }
             try
             {
                 //--- Deleted ---//
+                Console.WriteLine("----- Processing DELETED events -----");
                 listF = list.Where(x => x.ChangeType == WatcherChangeTypes.Deleted).ToList();
                 foreach (FileSystemEventArgs f in listF)
                 {
                     destination = f.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
                     if (Directory.Exists(destination))
                     {
-                        Directory.Delete(destination, true);
+                        Console.WriteLine($"Processing directory {destination}");
+                        FileUtils.ProcessDirectoryRecursively(destination, null, FileUtils.FileActions.Delete);
+                        Directory.Delete(destination);
                     }
                     else
                     {
+                        Console.WriteLine($"Processing file {destination}");
+                        FileUtils.OpenFilesAndWaitIfNeeded(destination).ForEach(filestream => filestream?.Close());
                         File.Delete(destination);
                     }
                 }
             }
             catch (Exception x)
             {
-                //TODO : Ajouter des logs
+                Console.WriteLine($"[Error] Unable to process DELETED events {x.Message}");
             }
         }
 
@@ -326,45 +347,6 @@ namespace Synchronisation.Core
                 }
             }
             return newList;
-        }
-
-        /// <summary>
-        ///     Ouvre un fichier avec attente si le fichier n'est pas disponible.
-        /// </summary>
-        /// <param name="filePath">Chemin du fichier à ouvrir.</param>
-        /// <returns>Flux du fichier ouvert.</returns>
-        private FileStream OpenFileAndWaitIfNeeded(string filePath)
-        {
-            bool isFileBusy = true;
-            FileStream fileStream = null;
-
-            DateTime startDateTime = DateTime.Now;
-
-            do
-            {
-                try
-                {
-                    fileStream = File.Open(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-                    isFileBusy = false; //Si on arrive à ouvrir, le fichier est accessible
-                }
-                catch (IOException ex)
-                {
-                    //Si on a une erreur d'IO, c'est que le fichier est encore ouvert
-                    System.Threading.Thread.Sleep(200);
-                }
-                catch (Exception ex)
-                {
-                    throw new Exception("Erreur à l'ouverture du fichier", ex);
-                }
-
-                if (DateTime.Now > startDateTime.AddMinutes(15))
-                {
-                    throw new Exception("Délai d'attente dépassé, impossible d'ouvrir le fichier.");
-                }
-
-            } while (isFileBusy);
-
-            return fileStream;
         }
 
         #endregion

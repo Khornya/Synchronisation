@@ -9,9 +9,8 @@ namespace Synchronisation.Core
     public class FileSyncService
     {
         //TODO: 2-way sync
-        //TODO: comparaison bit à bit des fichiers
-        //TODO: fichier de config
         //TODO: sync au démarrage
+        //TODO: interrompre le worker à la pause du service
 
         #region Fields
 
@@ -24,6 +23,18 @@ namespace Synchronisation.Core
         ///     Chemin du dossier de sortie.
         /// </summary>
         private readonly string _OutputFolderPath;
+
+        /// <summary>
+        ///     Mode de synchronisation
+        /// </summary>
+        private readonly SyncMode _SyncMode;
+
+        public enum SyncMode
+        {
+            OneWay,
+            TwoWaySourceFirst,
+            TwoWayDestFirst
+        }
 
         /// <summary>
         ///     Classe d'écoute du répertoire d'entrée.
@@ -46,12 +57,13 @@ namespace Synchronisation.Core
         /// </summary>
         /// <param name="inputFolderPath">Chemin du répertoire d'entrée.</param>
         /// <param name="outputFolderPath">Chemin du répertoire de sortie.</param>
-        public FileSyncService(string inputFolderPath, string outputFolderPath, int millis)
+        public FileSyncService(string inputFolderPath, string outputFolderPath, string syncMode)
         {
             this._InputFolderPath = !string.IsNullOrWhiteSpace(inputFolderPath) ?
                                         inputFolderPath : throw new ArgumentNullException(nameof(inputFolderPath));
             this._OutputFolderPath = !string.IsNullOrWhiteSpace(outputFolderPath) ?
                                         outputFolderPath : throw new ArgumentNullException(nameof(outputFolderPath));
+            this._SyncMode = (SyncMode) Enum.Parse(typeof(SyncMode), syncMode);
         }
 
         #endregion

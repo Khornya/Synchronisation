@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Configuration;
 using System.Data;
 using System.Diagnostics;
 using System.Linq;
@@ -30,7 +31,7 @@ namespace Synchronisation.Service
         public Service1()
         {
             this.InitializeComponent();
-            this._Service = new FileSyncService(@"C:\TMP\INPUT", "C:\\TMP\\OUTPUT");
+            this._Service = new FileSyncService(ConfigurationManager.AppSettings.Get("Folder1"), ConfigurationManager.AppSettings.Get("Folder2"), ConfigurationManager.AppSettings.Get("SyncMode"));
             //Permet d'accepter la mise en pause et la reprise du service.
             this.CanPauseAndContinue = true;
         }

@@ -68,10 +68,10 @@ namespace Synchronisation.Core
         public static void ProcessDirectoryRecursively(string source, string dest, FileActions action)
         {
             string[] files;
-
+            
             if (action != FileActions.Delete)
             {
-                if (dest[dest.Length - 1] != Path.DirectorySeparatorChar)
+                if (dest?.Length > 0 && dest[dest.Length - 1] != Path.DirectorySeparatorChar)
                 {
                     dest += Path.DirectorySeparatorChar;
                 }
@@ -87,28 +87,36 @@ namespace Synchronisation.Core
                 // Sub directories
                 if (Directory.Exists(file))
                 {
-                    ProcessDirectoryRecursively(file, dest + Path.GetFileName(file), action);
+                    string newDest = dest != null ? dest + Path.GetFileName(file) : null;
+                    ProcessDirectoryRecursively(file, newDest, action);
                 }
                 // Files in directory
                 else
                 {
-                    string destFilepath = dest + Path.GetFileName(file);
-                    OpenFilesAndWaitIfNeeded(file, destFilepath).ForEach(filestream => filestream?.Close());
-                    switch(action)
+                    string destFilepath = action == FileActions.Delete ? null : dest + Path.GetFileName(file);
+                    if (action != FileActions.Delete || !File.Exists(destFilepath))
                     {
-                        case FileActions.Copy:
-                            File.Copy(file, destFilepath, true);
-                            break;
-                        case FileActions.Delete:
-                            File.Delete(file);
-                            break;
-                        case FileActions.Move:
-                            File.Move(file, destFilepath);
-                            break;
-                        default:
-                            throw new ArgumentException();
+                        OpenFilesAndWaitIfNeeded(file, destFilepath).ForEach(filestream => filestream?.Close());
+                        switch (action)
+                        {
+                            case FileActions.Copy:
+                                File.Copy(file, destFilepath, true);
+                                break;
+                            case FileActions.Delete:
+                                File.Delete(file);
+                                break;
+                            case FileActions.Move:
+                                File.Move(file, destFilepath);
+                                break;
+                            default:
+                                throw new ArgumentException();
+                        }
                     }
                 }
+            }
+            if (action == FileActions.Delete)
+            {
+                Directory.Delete(source);
             }
         }
 

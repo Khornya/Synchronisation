@@ -7,7 +7,7 @@ namespace Synchronisation.Client
     {
         static void Main(string[] args)
         {
-            FileSyncService service = new FileSyncService(@"C:\TMP\INPUT", "C:\\TMP\\OUTPUT", "OneWay");
+            FileSyncService service = new FileSyncService(@"C:\TMP\INPUT", "C:\\TMP\\OUTPUT", "TwoWaySourceFirst");
 
             service.Start();
 

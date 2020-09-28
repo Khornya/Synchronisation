@@ -114,7 +114,7 @@ namespace Synchronisation.Core
                     }
                 }
             }
-            if (action == FileActions.Delete)
+            if (action == FileActions.Delete || action == FileActions.Move)
             {
                 Directory.Delete(source);
             }

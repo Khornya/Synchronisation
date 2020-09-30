@@ -8,7 +8,6 @@ namespace Synchronisation.Core
 {
     public class FileSyncService
     {
-        //TODO: sync au démarrage
         //TODO: loggers
         //TODO: interrompre le worker à la pause du service
         //TODO: refacto
@@ -49,6 +48,7 @@ namespace Synchronisation.Core
         private List<Change> _Events;
 
         private List<string> _IgnoredFolders;
+        private List<string> _IgnoredFiles;
 
         private Thread _Worker;
         private FileSystemWatcher _OutputWatcher;
@@ -64,7 +64,7 @@ namespace Synchronisation.Core
         /// <param name="folder2Path">Chemin du répertoire de sortie.</param>
         public FileSyncService(string folder1Path, string folder2Path, string syncMode)
         {
-            this._SyncMode = (SyncMode) Enum.Parse(typeof(SyncMode), syncMode);
+            this._SyncMode = (SyncMode)Enum.Parse(typeof(SyncMode), syncMode);
             if (string.IsNullOrWhiteSpace(folder1Path))
             {
                 throw new ArgumentNullException(nameof(folder1Path));
@@ -106,18 +106,12 @@ namespace Synchronisation.Core
                     throw new Exception("Impossible de créer le dossier d'entrée ou de sortie", ex);
                 }
 
-                try
-                {
-                    //TODO: sync at start
-                }
-                catch (Exception)
-                {
-                    throw;
-                }
+                FileUtils.MirrorUpdate(this._InputFolderPath, this._OutputFolderPath);
 
                 //On initialise la liste des événements
                 this._Events = new List<Change>();
                 this._IgnoredFolders = new List<string>();
+                this._IgnoredFiles = new List<string>();
 
                 //On crée un thread pour traiter les événements
                 this._Worker = new Thread(processEvents);
@@ -193,7 +187,8 @@ namespace Synchronisation.Core
                                     // Remove all "Created" and "Changed" events of child folders and files from the master list
                                     _Events = _Events.Where(s => (s.ChangeType == WatcherChangeTypes.Created || s.ChangeType == WatcherChangeTypes.Changed) && s.FullPath.Contains(e.FullPath) == false).ToList();
                                 }
-                            } else
+                            }
+                            else
                             {
                                 lock (_Events)
                                 {
@@ -265,7 +260,7 @@ namespace Synchronisation.Core
         /// <param name="e">Arguments de l'événements.</param>
         private void Watcher_Event(object sender, FileSystemEventArgs e)
         {
-            if (!this._IgnoredFolders.Exists(path => e.FullPath.StartsWith(path)))
+            if (!this._IgnoredFolders.Exists(path => e.FullPath.StartsWith(path)) && !this._IgnoredFiles.Exists(path => e.FullPath == path))
             {
                 lock (this._Events)
                 {
@@ -490,6 +485,132 @@ namespace Synchronisation.Core
                 default:
                     throw new NotImplementedException();
             }
+        }
+
+        private void ProcessOutputFolderDeletedFile(Change e, string source)
+        {
+            Console.WriteLine($"Processing file {e.FullPath} (deleted), recovering from {source}");
+            FileUtils.OpenFilesAndWaitIfNeeded(source, e.FullPath).ForEach(filestream => filestream?.Close());
+            this._IgnoredFolders.Add(e.FullPath);
+            File.Copy(source, e.FullPath);
+            this._IgnoredFolders.Remove(e.FullPath);
+        }
+
+        private void ProcessOutputFolderDeletedDirectory(Change e, string source)
+        {
+            Console.WriteLine($"Processing directory {e.FullPath} (deleted), recovering from {source}");
+            this._IgnoredFolders.Add(e.FullPath);
+            FileUtils.ProcessDirectoryRecursively(source, e.FullPath, FileUtils.FileActions.Copy);
+            this._IgnoredFolders.Remove(e.FullPath);
+        }
+
+        private void ProcessInputFolderDeletedFile(Change e, string destination)
+        {
+            Console.WriteLine($"Processing file {e.FullPath} (deleted)");
+            FileUtils.OpenFilesAndWaitIfNeeded(destination).ForEach(filestream => filestream?.Close());
+            this._IgnoredFiles.Add(destination);
+            File.Delete(destination);
+            this._IgnoredFiles.Remove(destination);
+        }
+
+        private void ProcessInputFolderDeletedDirectory(Change e, string destination)
+        {
+            Console.WriteLine($"Processing directory {e.FullPath} (deleted)");
+            this._IgnoredFolders.Add(destination);
+            FileUtils.ProcessDirectoryRecursively(destination, null, FileUtils.FileActions.Delete);
+            this._IgnoredFolders.Remove(destination);
+        }
+
+        private void ProcessOutputFolderRenamedFile(Change e)
+        {
+            Console.WriteLine($"Processing file {e.OldFullPath} (renamed), reverting");
+            FileUtils.OpenFilesAndWaitIfNeeded(e.FullPath, e.OldFullPath).ForEach(filestream => filestream?.Close());
+            this._IgnoredFiles.Add(e.FullPath);
+            this._IgnoredFiles.Add(e.OldFullPath);
+            Directory.CreateDirectory(Directory.GetParent(e.OldFullPath).FullName);
+            File.Move(e.FullPath, e.OldFullPath);
+            this._IgnoredFiles.Remove(e.FullPath);
+            this._IgnoredFiles.Remove(e.OldFullPath);
+        }
+
+        private void ProcessOutputFolderRenamedDirectory(Change e)
+        {
+            Console.WriteLine($"Processing directory {e.OldFullPath} (renamed), reverting");
+            this._IgnoredFolders.Add(e.FullPath);
+            FileUtils.ProcessDirectoryRecursively(e.FullPath, e.OldFullPath, FileUtils.FileActions.Move);
+            this._IgnoredFolders.Remove(e.FullPath);
+        }
+
+        private void ProcessInputFolderRenamedFile(Change e, string destination)
+        {
+            string oldFPath = e.OldFullPath.Replace(_InputFolderPath, _OutputFolderPath);
+            string newFPath = e.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
+            Console.WriteLine($"Processing file {e.OldFullPath} (renamed)");
+            FileUtils.OpenFilesAndWaitIfNeeded(oldFPath).ForEach(filestream => filestream?.Close());
+            this._IgnoredFiles.Add(oldFPath);
+            this._IgnoredFiles.Add(newFPath);
+            Directory.CreateDirectory(Directory.GetParent(newFPath).FullName);
+            File.Move(oldFPath, newFPath);
+            this._IgnoredFiles.Remove(oldFPath);
+            this._IgnoredFiles.Remove(newFPath);
+        }
+
+        private void ProcessInputFolderRenamedDirectory(Change e, string destination)
+        {
+            string oldFPath = e.OldFullPath.Replace(_InputFolderPath, _OutputFolderPath);
+            string newFPath = e.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
+            Console.WriteLine($"Processing directory {e.OldFullPath} (renamed)");
+            this._IgnoredFolders.Add(e.OldFullPath);
+            FileUtils.ProcessDirectoryRecursively(oldFPath, newFPath, FileUtils.FileActions.Move);
+            this._IgnoredFolders.Remove(e.OldFullPath);
+        }
+
+        private void ProcessOutputFolderChangedFile(Change e)
+        {
+            string source = e.FullPath.Replace(_OutputFolderPath, _InputFolderPath);
+            if (File.Exists(source))
+            {
+                Console.WriteLine($"Processing file {e.FullPath} (changed), recovering from {source}");
+                FileUtils.OpenFilesAndWaitIfNeeded(source, e.FullPath).ForEach(filestream => filestream?.Close());
+                this._IgnoredFiles.Add(e.FullPath);
+                File.Copy(source, e.FullPath, true);
+                this._IgnoredFiles.Remove(e.FullPath);
+            }
+        }
+
+        private void ProcessInputFolderChangedFile(Change e)
+        {
+            if (File.Exists(e.FullPath))
+            {
+                Console.WriteLine($"Processing file {e.FullPath} (changed)");
+                string destination = e.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
+                FileUtils.OpenFilesAndWaitIfNeeded(e.FullPath, destination).ForEach(filestream => filestream?.Close());
+                this._IgnoredFiles.Add(destination);
+                this._IgnoredFolders.Add(Directory.GetParent(destination).FullName);
+                Directory.CreateDirectory(Directory.GetParent(destination).FullName);
+                File.Copy(e.FullPath, destination, true);
+                this._IgnoredFiles.Remove(destination);
+                this._IgnoredFolders.Remove(Directory.GetParent(destination).FullName);
+            }
+        }
+
+        private void ProcessCreatedFile(Change e, string destination, bool isOutputFolderEvent)
+        {
+            Console.WriteLine($"Processing file {e.FullPath} (created)");
+            FileUtils.OpenFilesAndWaitIfNeeded(e.FullPath, destination).ForEach(filestream => filestream?.Close());
+            this._IgnoredFiles.Add(destination);
+            Directory.CreateDirectory(Directory.GetParent(destination).FullName);
+            File.Copy(e.FullPath, destination, true);
+            this._IgnoredFiles.Remove(destination);
+        }
+
+        private void ProcessCreatedDirectory(Change e, string destination, bool isOutputFolderEvent)
+        {
+            Console.WriteLine($"Processing directory {e.FullPath} (created)");
+            this._IgnoredFolders.Add(destination);
+            Directory.CreateDirectory(destination);
+            FileUtils.ProcessDirectoryRecursively(e.FullPath, destination, FileUtils.FileActions.Copy);
+            this._IgnoredFolders.Remove(destination);
         }
 
         private List<Change> RemoveDuplicates(List<Change> list)

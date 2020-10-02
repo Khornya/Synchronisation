@@ -16,31 +16,13 @@ namespace Synchronisation.Core
             Move
         }
 
-        private static long DirSize(DirectoryInfo d)
-        {
-            long Size = 0;
-            // Add file sizes.
-            FileInfo[] fis = d.GetFiles();
-            foreach (FileInfo fi in fis)
-            {
-                Size += fi.Length;
-            }
-            // Add subdirectory sizes.
-            DirectoryInfo[] dis = d.GetDirectories();
-            foreach (DirectoryInfo di in dis)
-            {
-                Size += DirSize(di);
-            }
-            return (Size);
-        }
-
         ///<summary>
         /// Processes files and directory structure recursively.
         ///</summary>
         public static void ProcessDirectoryRecursively(string source, string dest, FileActions action)
         {
             string[] files;
-            
+
             if (action != FileActions.Delete)
             {
                 if (dest?.Length > 0 && dest[dest.Length - 1] != Path.DirectorySeparatorChar)
@@ -52,7 +34,7 @@ namespace Synchronisation.Core
                     Directory.CreateDirectory(dest);
                 }
             }
-                
+
             files = Directory.GetFileSystemEntries(source);
             foreach (string file in files)
             {
@@ -72,7 +54,10 @@ namespace Synchronisation.Core
                         switch (action)
                         {
                             case FileActions.Copy:
-                                File.Copy(file, destFilepath, true);
+                                if (!AreFilesIdentical(file, destFilepath))
+                                {
+                                    File.Copy(file, destFilepath, true);
+                                }
                                 break;
                             case FileActions.Delete:
                                 File.Delete(file);
@@ -92,6 +77,52 @@ namespace Synchronisation.Core
             }
         }
 
+        public static bool AreFilesIdentical(string file1, string file2)
+        {
+            OpenFilesAndWaitIfNeeded(file1, file2).ForEach(filestream => filestream?.Close());
+            try
+            {
+                if (!File.Exists(file1) || !File.Exists(file2))
+                {
+                    return false;
+                }
+                byte[] file1Bytes;
+                byte[] file2Bytes;
+                try
+                {
+                    file1Bytes = File.ReadAllBytes(file1);
+                    file2Bytes = File.ReadAllBytes(file2);
+                } catch (Exception ex)
+                {
+                    Console.WriteLine($"Error while reading {file1} and {file2}");
+                    throw ex;
+                }
+                if (file1Bytes.Length != file2Bytes.Length)
+                {
+                    return false;
+                }
+                else
+                {
+                    for (int i = 0; i < file1Bytes.Length; i++)
+                    {
+                        if (file1Bytes[i] == file2Bytes[i])
+                        {
+                            i++;
+                        }
+                        else
+                        {
+                            return false;
+                        }
+                    }
+                    return true;
+                }
+            } catch (Exception ex)
+            {
+                Console.WriteLine("Erreur :" + ex.Message);
+                throw;
+            }
+        }
+
         /// <summary>
         ///     Ouvre un fichier avec attente si le fichier n'est pas disponible.
         /// </summary>
@@ -100,7 +131,7 @@ namespace Synchronisation.Core
         public static List<FileStream> OpenFilesAndWaitIfNeeded(string sourceFilePath, string destFilePath = null)
         {
             //Console.WriteLine($"Trying to open {sourceFilePath} and {destFilePath}");
-            bool isSourceFileBusy = true;
+            bool isSourceFileBusy = !(string.IsNullOrEmpty(sourceFilePath) || !File.Exists(sourceFilePath));
             bool isDestFileBusy = !(string.IsNullOrEmpty(destFilePath) || !File.Exists(destFilePath));
             bool wait = false;
             FileStream sourceFileStream = null;
@@ -110,7 +141,7 @@ namespace Synchronisation.Core
 
             do
             {
-                if(isSourceFileBusy)
+                if (isSourceFileBusy)
                 {
                     try
                     {
@@ -156,7 +187,7 @@ namespace Synchronisation.Core
                     System.Threading.Thread.Sleep(200);
                 }
 
-                if (DateTime.Now > startDateTime.AddMinutes(15))
+                if (DateTime.Now > startDateTime.AddMinutes(1))
                 {
                     throw new Exception("Délai d'attente dépassé, impossible d'ouvrir le(s) fichier(s).");
                 }
@@ -168,120 +199,24 @@ namespace Synchronisation.Core
             return fileStreams;
         }
 
-        public static void MirrorUpdate(string source, string mirror)
-        {
-
-            if (appearIdentical(source, mirror)) return;
-
-            String[] ioData = Directory.GetFileSystemEntries(source);
-
-            // Add missing folders and files
-            foreach (string path in ioData)
-            {
-                if (File.Exists(path))
-                {
-                    // This path is a file
-                    ProcessAddFile(path, source, mirror);
-                }
-                else if (Directory.Exists(path))
-                {
-                    // This path is a directory
-                    ProcessAddDirectory(path, source, mirror);
-                }
-            }
-
-            if (appearIdentical(source, mirror)) return;
-
-            removeOrphans(source, mirror);
-        }
-
         // Remove files and folders from the mirror that dont exist in the source folder
-        private static void removeOrphans(string source, string mirror)
+        public static void RemoveOrphans(string source, string destination)
         {
-            String[] ioData = Directory.GetFileSystemEntries(mirror);
+            String[] ioData = Directory.GetFileSystemEntries(destination);
 
             // Delete orphan folders and files
             foreach (string path in ioData)
             {
                 if (File.Exists(path))
                 {
-                    if (!File.Exists(path.Replace(mirror, source))) File.Delete(path);
+                    if (!File.Exists(path.Replace(destination, source))) File.Delete(path);
                 }
                 else if (Directory.Exists(path))
                 {
-                    if (!Directory.Exists(path.Replace(mirror, source))) Directory.Delete(path, true);
-                    else removeOrphans(path.Replace(mirror, source), path);
+                    if (!Directory.Exists(path.Replace(destination, source))) Directory.Delete(path, true);
+                    else RemoveOrphans(path.Replace(destination, source), path);
                 }
             }
-        }
-
-        public static long GetDirectorySize(string path)
-        {
-            DirectoryInfo d = new DirectoryInfo(path);
-            long Size = 0;
-            // Add file sizes.
-            FileInfo[] fis = d.GetFiles();
-            foreach (FileInfo fi in fis)
-            {
-                Size += fi.Length;
-            }
-            // Add subdirectory sizes.
-            DirectoryInfo[] dis = d.GetDirectories();
-            foreach (DirectoryInfo di in dis)
-            {
-                Size += DirSize(di);
-            }
-            return (Size);
-        }
-
-        private static bool appearIdentical(string source, string mirror)
-        {
-            long sSize = GetDirectorySize(source);
-            long mSize = GetDirectorySize(mirror);
-            if (sSize == mSize) return true;
-            return false;
-        }
-
-        private static void ProcessAddDirectory(string path, string source, string mirror)
-        {
-            string target = path.Replace(source, mirror);
-            if (!Directory.Exists(target))
-            {
-                Directory.CreateDirectory(target);
-                ProcessDirectoryRecursively(path, target, FileActions.Copy);
-            }
-
-            // Process the list of files found in the directory.
-            string[] fileEntries = Directory.GetFiles(path);
-            foreach (string fileName in fileEntries)
-            {
-                ProcessAddFile(fileName, source, mirror);
-            }
-
-            // Recurse into subdirectories of this directory.
-            string[] subdirectoryEntries = Directory.GetDirectories(path);
-            foreach (string subdirectory in subdirectoryEntries)
-            {
-                ProcessAddDirectory(subdirectory, source, mirror);
-            }
-        }
-
-        private static void ProcessAddFile(string path, string source, string mirror)
-        {
-            string target = path.Replace(source, mirror);
-            if (!File.Exists(target))
-            {
-                File.Copy(path, target);
-            }
-            else
-            {
-                FileInfo fS = new FileInfo(path);
-                FileInfo fM = new FileInfo(target);
-                if (fS.Length != fM.Length)
-                {
-                    File.Copy(path, target);
-                }
-            }
-        }
+        }        
     }
 }

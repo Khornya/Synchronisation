@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -9,9 +10,7 @@ namespace Synchronisation.Core
     public class FileSyncService
     {
         //TODO: loggers
-        //TODO: interrompre le worker à la pause du service
-        //TODO: refacto
-        //TODO: copier seulement si les fichiers sont différents
+        //TODO: gestion des exceptions
 
         #region Fields
 
@@ -49,9 +48,9 @@ namespace Synchronisation.Core
 
         private List<string> _IgnoredFolders;
         private List<string> _IgnoredFiles;
-
         private Thread _Worker;
         private FileSystemWatcher _OutputWatcher;
+        private volatile bool _ShouldInterrupt;
 
         #endregion
 
@@ -106,12 +105,21 @@ namespace Synchronisation.Core
                     throw new Exception("Impossible de créer le dossier d'entrée ou de sortie", ex);
                 }
 
-                FileUtils.MirrorUpdate(this._InputFolderPath, this._OutputFolderPath);
+                try
+                {
+                    FileUtils.ProcessDirectoryRecursively(this._InputFolderPath, this._OutputFolderPath, FileUtils.FileActions.Copy);
+                    FileUtils.RemoveOrphans(this._InputFolderPath, this._OutputFolderPath);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex.Message);
+                }
 
                 //On initialise la liste des événements
                 this._Events = new List<Change>();
                 this._IgnoredFolders = new List<string>();
                 this._IgnoredFiles = new List<string>();
+                this._ShouldInterrupt = false;
 
                 //On crée un thread pour traiter les événements
                 this._Worker = new Thread(processEvents);
@@ -161,46 +169,76 @@ namespace Synchronisation.Core
         }
 
         private void processEvents(object obj)
-        { //TODO : disable events on the other watcher when processing
+        {
             while (true)
             {
-                if (_Events.Count > 0)
+                if (_ShouldInterrupt)
                 {
-                    Change e = _Events.First();
-                    lock (this._Events)
+                    Thread.Sleep(1000);
+                }
+                else
+                {
+                    if (_Events.Count > 0)
                     {
-                        _Events.RemoveAt(0);
-                    }
-                    switch (e.ChangeType)
-                    {
-                        case WatcherChangeTypes.Changed:
-                            lock (_Events)
+                        Change e = _Events.First();
+                        lock (this._Events)
+                        {
+                            _Events.RemoveAt(0);
+                        }
+                        if (e.RetryCount <= 3)
+                        {
+                            switch (e.ChangeType)
                             {
-                                _Events = RemoveDuplicates(_Events);
+                                case WatcherChangeTypes.Changed:
+                                    lock (_Events)
+                                    {
+                                        _Events = RemoveDuplicates(_Events);
+                                    }
+                                    break;
+                                case WatcherChangeTypes.Created:
+                                    if (Directory.Exists(e.FullPath))
+                                    {
+                                        lock (_Events)
+                                        {
+                                            // Remove all "Created" and "Changed" events of child folders and files from the master list
+                                            _Events = _Events.Where(s => (s.ChangeType == WatcherChangeTypes.Created || s.ChangeType == WatcherChangeTypes.Changed) && s.FullPath.Contains(e.FullPath) == false).ToList();
+                                        }
+                                    }
+                                    else
+                                    {
+                                        lock (_Events)
+                                        {
+                                            // Remove all "Changed" events for this file from the master list
+                                            _Events = _Events.Where(s => (s.ChangeType != WatcherChangeTypes.Changed && s.FullPath != e.FullPath)).ToList();
+                                        }
+                                    }
+                                    break;
+                                default:
+                                    break;
                             }
-                            break;
-                        case WatcherChangeTypes.Created:
-                            if (Directory.Exists(e.FullPath))
+                            try
                             {
+                                process(e);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Erreur pendant le traitement de {e.FullPath} ({e.ChangeType}) : {ex.Message}");
+                                e.RetryCount++;
                                 lock (_Events)
                                 {
-                                    // Remove all "Created" and "Changed" events of child folders and files from the master list
-                                    _Events = _Events.Where(s => (s.ChangeType == WatcherChangeTypes.Created || s.ChangeType == WatcherChangeTypes.Changed) && s.FullPath.Contains(e.FullPath) == false).ToList();
+                                    _Events.Add(e);
                                 }
                             }
-                            else
-                            {
-                                lock (_Events)
-                                {
-                                    // Remove all "Changed" events for this file from the master list
-                                    _Events = _Events.Where(s => (s.ChangeType != WatcherChangeTypes.Changed && s.FullPath != e.FullPath)).ToList();
-                                }
-                            }
-                            break;
-                        default:
-                            break;
+                            //finally
+                            //{
+                            //    _InputWatcher.EnableRaisingEvents = true;
+                            //    if (_OutputWatcher != null)
+                            //    {
+                            //        _OutputWatcher.EnableRaisingEvents = true;
+                            //    }
+                            //}
+                        }
                     }
-                    process(e);
                 }
             }
         }
@@ -210,12 +248,20 @@ namespace Synchronisation.Core
         /// </summary>
         public void Pause()
         {
-            if (this._InputWatcher != null && this._InputWatcher.EnableRaisingEvents)
+            this._ShouldInterrupt = true;
+            SetWatcherEvents(_InputWatcher, value: false);
+            SetWatcherEvents(_OutputWatcher, value: false);
+            this._Events = new List<Change>();
+            this._IgnoredFolders = new List<string>();
+            this._IgnoredFiles = new List<string>();
+            Console.WriteLine("Service paused.");
+        }
+
+        private void SetWatcherEvents(FileSystemWatcher watcher, bool value)
+        {
+            if (watcher != null)
             {
-                this._InputWatcher.EnableRaisingEvents = false;
-                this._Events = new List<Change>();
-                this._IgnoredFolders = new List<string>();
-                Console.WriteLine("Service paused.");
+                watcher.EnableRaisingEvents = value;
             }
         }
 
@@ -224,11 +270,10 @@ namespace Synchronisation.Core
         /// </summary>
         public void Continue()
         {
-            if (this._InputWatcher != null && !this._InputWatcher.EnableRaisingEvents)
-            {
-                this._InputWatcher.EnableRaisingEvents = true;
-                Console.WriteLine("Service resumed.");
-            }
+            this._ShouldInterrupt = false;
+            SetWatcherEvents(_InputWatcher, value: true);
+            SetWatcherEvents(_OutputWatcher, value: true);
+            Console.WriteLine("Service resumed.");
         }
 
         /// <summary>
@@ -245,10 +290,21 @@ namespace Synchronisation.Core
                 this._InputWatcher.Error -= this.Watcher_Error;
                 this._InputWatcher.Dispose();
                 this._InputWatcher = null; // TODO: à revoir, le service n'est pas arrêté
-                this._Events = new List<Change>();
-                this._IgnoredFolders = new List<string>();
-                Console.WriteLine("Service stopped");
             }
+            if (this._OutputWatcher != null)
+            {
+                this._OutputWatcher.Created -= this.Watcher_Event;
+                this._OutputWatcher.Changed -= this.Watcher_Event;
+                this._OutputWatcher.Deleted -= this.Watcher_Event;
+                this._OutputWatcher.Renamed -= this.Watcher_Event;
+                this._OutputWatcher.Error -= this.Watcher_Error;
+                this._OutputWatcher.Dispose();
+                this._OutputWatcher = null; // TODO: à revoir, le service n'est pas arrêté
+            }
+            this._ShouldInterrupt = true;
+            this._Events = new List<Change>();
+            this._IgnoredFolders = new List<string>();
+            Console.WriteLine("Service stopped");
         }
 
         #endregion
@@ -260,7 +316,7 @@ namespace Synchronisation.Core
         /// <param name="e">Arguments de l'événements.</param>
         private void Watcher_Event(object sender, FileSystemEventArgs e)
         {
-            if (!this._IgnoredFolders.Exists(path => e.FullPath.StartsWith(path)) && !this._IgnoredFiles.Exists(path => e.FullPath == path))
+            if (!this._IgnoredFolders.Exists(path => e.FullPath.StartsWith(path)) && !this._IgnoredFiles.Exists(path => e.FullPath == path)) //TODO : éviter startswith
             {
                 lock (this._Events)
                 {
@@ -285,332 +341,188 @@ namespace Synchronisation.Core
         {
             string source;
             string destination;
-            Boolean isOutputFolderEvent = e.FullPath.StartsWith(_OutputFolderPath);
+            bool isOutputFolderEvent = e.FullPath.StartsWith(_OutputFolderPath);
             switch (e.ChangeType)
             {
                 case WatcherChangeTypes.Created:
-                    destination = isOutputFolderEvent ? e.FullPath.Replace(_OutputFolderPath, _InputFolderPath) : e.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
+                    source = e.FullPath;
+                    destination = isOutputFolderEvent ? e.FullPath.Replace(_OutputFolderPath, _InputFolderPath) : e.FullPath.Replace(_InputFolderPath, _OutputFolderPath); // éviter replace
                     if (Directory.Exists(e.FullPath))
-                        {
-                            Console.WriteLine($"Processing directory {e.FullPath} (created)");
-                            if (isOutputFolderEvent) {
-                                this._InputWatcher.EnableRaisingEvents = false;
-                            } else if (this._OutputWatcher != null)
-                            {
-                                this._OutputWatcher.EnableRaisingEvents = false;
-                            }
-                            Directory.CreateDirectory(destination);
-                            FileUtils.ProcessDirectoryRecursively(e.FullPath, destination, FileUtils.FileActions.Copy);
-                            if (isOutputFolderEvent)
-                            {
-                                this._InputWatcher.EnableRaisingEvents = true;
-                            }
-                            else if (this._OutputWatcher != null)
-                            {
-                                this._OutputWatcher.EnableRaisingEvents = true;
-                            }
-                        }
-                        else
-                        {
-                            Console.WriteLine($"Processing file {e.FullPath} (created)");
-                            FileUtils.OpenFilesAndWaitIfNeeded(e.FullPath, destination).ForEach(filestream => filestream?.Close());
-                            if (isOutputFolderEvent)
-                            {
-                                this._InputWatcher.EnableRaisingEvents = false;
-                            }
-                            else if (this._OutputWatcher != null)
-                            {
-                                this._OutputWatcher.EnableRaisingEvents = false;
-                            }
-                            Directory.CreateDirectory(Directory.GetParent(destination).FullName);
-                            File.Copy(e.FullPath, destination, true);
-                            if (isOutputFolderEvent)
-                            {
-                                this._InputWatcher.EnableRaisingEvents = true;
-                            }
-                            else if (this._OutputWatcher != null)
-                            {
-                                this._OutputWatcher.EnableRaisingEvents = true;
-                            }
+                    {
+                        Console.WriteLine($"Processing directory {source} (created)");
+                        ProcessDirectory(e, source, destination, FileUtils.FileActions.Copy);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Processing file {source} (created)");
+                        ProcessFile(e, source, destination, FileUtils.FileActions.Copy);
                     }
                     break;
                 case WatcherChangeTypes.Changed:
-                    if (!isOutputFolderEvent)
+                    destination = isOutputFolderEvent ? e.FullPath : e.FullPath.Replace(_InputFolderPath, _OutputFolderPath); // éviter replace
+                    source = isOutputFolderEvent ? e.FullPath.Replace(_OutputFolderPath, _InputFolderPath) : e.FullPath;
+                    if (File.Exists(source))
                     {
-                        if (File.Exists(e.FullPath))
+                        if (isOutputFolderEvent)
                         {
-                            Console.WriteLine($"Processing file {e.FullPath} (changed)");
-                            destination = e.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
-                            FileUtils.OpenFilesAndWaitIfNeeded(e.FullPath, destination).ForEach(filestream => filestream?.Close());
-                            if (this._OutputWatcher != null)
-                            {
-                                this._OutputWatcher.EnableRaisingEvents = false;
-                            }
-                            Directory.CreateDirectory(Directory.GetParent(destination).FullName);
-                            File.Copy(e.FullPath, destination, true);
-                            if (this._OutputWatcher != null)
-                            {
-                                this._OutputWatcher.EnableRaisingEvents = true;
-                            }
+                            Console.WriteLine($"Processing file {destination} (changed), recovering from {source}");
                         }
-                    } else
-                    {
-                        source = e.FullPath.Replace(_OutputFolderPath, _InputFolderPath);
-                        if (File.Exists(source))
+                        else
                         {
-                            Console.WriteLine($"Processing file {e.FullPath} (changed), recovering from {source}");
-                            FileUtils.OpenFilesAndWaitIfNeeded(source, e.FullPath).ForEach(filestream => filestream?.Close());
-                            if (this._OutputWatcher != null)
-                            {
-                                this._OutputWatcher.EnableRaisingEvents = false;
-                            }
-                            File.Copy(source, e.FullPath, true);
-                            if (this._OutputWatcher != null)
-                            {
-                                this._OutputWatcher.EnableRaisingEvents = true;
-                            }
+                            Console.WriteLine($"Processing file {source} (changed)");
                         }
+                        ProcessFile(e, source, destination, FileUtils.FileActions.Copy);
                     }
                     break;
                 case WatcherChangeTypes.Renamed:
-                    if (!isOutputFolderEvent)
+                    source = isOutputFolderEvent ? e.FullPath : e.OldFullPath.Replace(_InputFolderPath, _OutputFolderPath);
+                    destination = isOutputFolderEvent ? e.OldFullPath : e.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
+
+                    if (Directory.Exists(source))
                     {
-                        destination = e.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
-                        if (Directory.Exists(e.OldFullPath.Replace(_InputFolderPath, _OutputFolderPath)))
+                        if (isOutputFolderEvent)
                         {
-                            string oldFPath = e.OldFullPath.Replace(_InputFolderPath, _OutputFolderPath);
-                            string newFPath = e.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
-                            Console.WriteLine($"Processing directory {oldFPath} (renamed)");
-                            if (this._OutputWatcher != null)
-                            {
-                                this._OutputWatcher.EnableRaisingEvents = false;
-                            }
-                            FileUtils.ProcessDirectoryRecursively(oldFPath, newFPath, FileUtils.FileActions.Move);
-                            if (this._OutputWatcher != null)
-                            {
-                                this._OutputWatcher.EnableRaisingEvents = true;
-                            }
+                            Console.WriteLine($"Processing directory {destination} (renamed), reverting");
                         }
                         else
                         {
-                            string oldFPath = e.OldFullPath.Replace(_InputFolderPath, _OutputFolderPath);
-                            string newFPath = e.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
-                            Console.WriteLine($"Processing file {oldFPath} (renamed)");
-                            FileUtils.OpenFilesAndWaitIfNeeded(oldFPath).ForEach(filestream => filestream?.Close());
-                            if (this._OutputWatcher != null)
-                            {
-                                this._OutputWatcher.EnableRaisingEvents = false;
-                            }
-                            Directory.CreateDirectory(Directory.GetParent(newFPath).FullName);
-                            File.Move(oldFPath, newFPath);
-                            if (this._OutputWatcher != null)
-                            {
-                                this._OutputWatcher.EnableRaisingEvents = true;
-                            }
+                            Console.WriteLine($"Processing directory {source} (renamed), renaming {destination}");
                         }
-                    } else
+                        ProcessDirectory(e, source, destination, FileUtils.FileActions.Move);
+                    }
+                    else if (File.Exists(source))
                     {
-                        if (Directory.Exists(e.FullPath))
+                        if (isOutputFolderEvent)
                         {
-                            Console.WriteLine($"Processing directory {e.OldFullPath} (renamed), reverting");
-                            this._OutputWatcher.EnableRaisingEvents = false;
-                            FileUtils.ProcessDirectoryRecursively(e.FullPath, e.OldFullPath, FileUtils.FileActions.Move);
-                            this._OutputWatcher.EnableRaisingEvents = true;
-                        }
-                        else
+                            Console.WriteLine($"Processing file {destination} (renamed), reverting");
+                        } else
                         {
-                            Console.WriteLine($"Processing file {e.OldFullPath} (renamed), reverting");
-                            FileUtils.OpenFilesAndWaitIfNeeded(e.FullPath, e.OldFullPath).ForEach(filestream => filestream?.Close());
-                            this._OutputWatcher.EnableRaisingEvents = false;
-                            Directory.CreateDirectory(Directory.GetParent(e.OldFullPath).FullName);
-                            File.Move(e.FullPath, e.OldFullPath);
-                            this._OutputWatcher.EnableRaisingEvents = true;
+                            Console.WriteLine($"Processing file {source} (renamed), renaming {destination}");
                         }
+                        ProcessFile(e, source, destination, FileUtils.FileActions.Move);
                     }
                     break;
                 case WatcherChangeTypes.Deleted:
-                    if (!isOutputFolderEvent)
+                    source = e.FullPath.Replace(_OutputFolderPath, _InputFolderPath);
+                    destination = isOutputFolderEvent ? e.FullPath : e.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
+                    if (isOutputFolderEvent)
                     {
-                        destination = e.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
+                        if (Directory.Exists(source))
+                        {
+                            Console.WriteLine($"Processing directory {destination} (deleted), recovering from {source}");
+                            ProcessDirectory(e, source, destination, FileUtils.FileActions.Copy);
+                        }
+                        else if (File.Exists(source))
+                        {
+                            Console.WriteLine($"Processing file {destination} (deleted), recovering from {source}");
+                            ProcessFile(e, source, destination, FileUtils.FileActions.Copy);
+                        }
+                    }
+                    else
+                    {
                         if (Directory.Exists(destination))
                         {
-                            Console.WriteLine($"Processing directory {destination} (deleted)");
-                            if (this._OutputWatcher != null)
-                            {
-                                this._OutputWatcher.EnableRaisingEvents = false;
-                            }
-                            FileUtils.ProcessDirectoryRecursively(destination, null, FileUtils.FileActions.Delete);
-                            if (this._OutputWatcher != null)
-                            {
-                                this._OutputWatcher.EnableRaisingEvents = true;
-                            }
+                            Console.WriteLine($"Processing directory {source} (deleted), deleting {destination}");
+                            ProcessDirectory(e, destination, null, FileUtils.FileActions.Delete);
                         }
                         else if (File.Exists(destination))
                         {
-                            Console.WriteLine($"Processing file {destination} (deleted)");
-                            FileUtils.OpenFilesAndWaitIfNeeded(destination).ForEach(filestream => filestream?.Close());
-                            if (this._OutputWatcher != null)
-                            {
-                                this._OutputWatcher.EnableRaisingEvents = false;
-                            }
-                            File.Delete(destination);
-                            if (this._OutputWatcher != null)
-                            {
-                                this._OutputWatcher.EnableRaisingEvents = true;
-                            }
-                        }
-                    } else
-                    {
-                        source = e.FullPath.Replace(_OutputFolderPath, _InputFolderPath);
-                        if (Directory.Exists(source))
-                        {
-                            Console.WriteLine($"Processing directory {e.FullPath} (deleted), recovering from {source}");
-                            this._IgnoredFolders.Add(e.FullPath);
-                            FileUtils.ProcessDirectoryRecursively(source, e.FullPath, FileUtils.FileActions.Copy);
-                            this._IgnoredFolders.Remove(e.FullPath);
-                        }
-                        else
-                        {
-                            if (File.Exists(source))
-                            {
-                                Console.WriteLine($"Processing file {e.FullPath} (deleted), recovering from {source}");
-                                FileUtils.OpenFilesAndWaitIfNeeded(source, e.FullPath).ForEach(filestream => filestream?.Close());
-                                this._OutputWatcher.EnableRaisingEvents = false;
-                                File.Copy(source, e.FullPath);
-                                this._OutputWatcher.EnableRaisingEvents = true;
-                            }
+                            Console.WriteLine($"Processing file {source} (deleted), deleting {destination}");
+                            ProcessFile(e, destination, null, FileUtils.FileActions.Delete);
                         }
                     }
                     break;
                 default:
-                    throw new NotImplementedException();
+                    Console.WriteLine("Unsupported change type");
+                    break;
             }
         }
 
-        private void ProcessOutputFolderDeletedFile(Change e, string source)
+        private void ProcessFile(Change e, string source, string destination, FileUtils.FileActions action)
         {
-            Console.WriteLine($"Processing file {e.FullPath} (deleted), recovering from {source}");
-            FileUtils.OpenFilesAndWaitIfNeeded(source, e.FullPath).ForEach(filestream => filestream?.Close());
-            this._IgnoredFolders.Add(e.FullPath);
-            File.Copy(source, e.FullPath);
-            this._IgnoredFolders.Remove(e.FullPath);
-        }
-
-        private void ProcessOutputFolderDeletedDirectory(Change e, string source)
-        {
-            Console.WriteLine($"Processing directory {e.FullPath} (deleted), recovering from {source}");
-            this._IgnoredFolders.Add(e.FullPath);
-            FileUtils.ProcessDirectoryRecursively(source, e.FullPath, FileUtils.FileActions.Copy);
-            this._IgnoredFolders.Remove(e.FullPath);
-        }
-
-        private void ProcessInputFolderDeletedFile(Change e, string destination)
-        {
-            Console.WriteLine($"Processing file {e.FullPath} (deleted)");
-            FileUtils.OpenFilesAndWaitIfNeeded(destination).ForEach(filestream => filestream?.Close());
-            this._IgnoredFiles.Add(destination);
-            File.Delete(destination);
-            this._IgnoredFiles.Remove(destination);
-        }
-
-        private void ProcessInputFolderDeletedDirectory(Change e, string destination)
-        {
-            Console.WriteLine($"Processing directory {e.FullPath} (deleted)");
-            this._IgnoredFolders.Add(destination);
-            FileUtils.ProcessDirectoryRecursively(destination, null, FileUtils.FileActions.Delete);
-            this._IgnoredFolders.Remove(destination);
-        }
-
-        private void ProcessOutputFolderRenamedFile(Change e)
-        {
-            Console.WriteLine($"Processing file {e.OldFullPath} (renamed), reverting");
-            FileUtils.OpenFilesAndWaitIfNeeded(e.FullPath, e.OldFullPath).ForEach(filestream => filestream?.Close());
-            this._IgnoredFiles.Add(e.FullPath);
-            this._IgnoredFiles.Add(e.OldFullPath);
-            Directory.CreateDirectory(Directory.GetParent(e.OldFullPath).FullName);
-            File.Move(e.FullPath, e.OldFullPath);
-            this._IgnoredFiles.Remove(e.FullPath);
-            this._IgnoredFiles.Remove(e.OldFullPath);
-        }
-
-        private void ProcessOutputFolderRenamedDirectory(Change e)
-        {
-            Console.WriteLine($"Processing directory {e.OldFullPath} (renamed), reverting");
-            this._IgnoredFolders.Add(e.FullPath);
-            FileUtils.ProcessDirectoryRecursively(e.FullPath, e.OldFullPath, FileUtils.FileActions.Move);
-            this._IgnoredFolders.Remove(e.FullPath);
-        }
-
-        private void ProcessInputFolderRenamedFile(Change e, string destination)
-        {
-            string oldFPath = e.OldFullPath.Replace(_InputFolderPath, _OutputFolderPath);
-            string newFPath = e.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
-            Console.WriteLine($"Processing file {e.OldFullPath} (renamed)");
-            FileUtils.OpenFilesAndWaitIfNeeded(oldFPath).ForEach(filestream => filestream?.Close());
-            this._IgnoredFiles.Add(oldFPath);
-            this._IgnoredFiles.Add(newFPath);
-            Directory.CreateDirectory(Directory.GetParent(newFPath).FullName);
-            File.Move(oldFPath, newFPath);
-            this._IgnoredFiles.Remove(oldFPath);
-            this._IgnoredFiles.Remove(newFPath);
-        }
-
-        private void ProcessInputFolderRenamedDirectory(Change e, string destination)
-        {
-            string oldFPath = e.OldFullPath.Replace(_InputFolderPath, _OutputFolderPath);
-            string newFPath = e.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
-            Console.WriteLine($"Processing directory {e.OldFullPath} (renamed)");
-            this._IgnoredFolders.Add(e.OldFullPath);
-            FileUtils.ProcessDirectoryRecursively(oldFPath, newFPath, FileUtils.FileActions.Move);
-            this._IgnoredFolders.Remove(e.OldFullPath);
-        }
-
-        private void ProcessOutputFolderChangedFile(Change e)
-        {
-            string source = e.FullPath.Replace(_OutputFolderPath, _InputFolderPath);
-            if (File.Exists(source))
+            FileUtils.OpenFilesAndWaitIfNeeded(source, destination).ForEach(filestream => filestream?.Close());
+            if (e.ChangeType == WatcherChangeTypes.Created)
             {
-                Console.WriteLine($"Processing file {e.FullPath} (changed), recovering from {source}");
-                FileUtils.OpenFilesAndWaitIfNeeded(source, e.FullPath).ForEach(filestream => filestream?.Close());
-                this._IgnoredFiles.Add(e.FullPath);
-                File.Copy(source, e.FullPath, true);
-                this._IgnoredFiles.Remove(e.FullPath);
+                SetOtherWatcherEvents(value: false, isOutputFolderEvent: source.StartsWith(_OutputFolderPath));
             }
-        }
-
-        private void ProcessInputFolderChangedFile(Change e)
-        {
-            if (File.Exists(e.FullPath))
+            else
             {
-                Console.WriteLine($"Processing file {e.FullPath} (changed)");
-                string destination = e.FullPath.Replace(_InputFolderPath, _OutputFolderPath);
-                FileUtils.OpenFilesAndWaitIfNeeded(e.FullPath, destination).ForEach(filestream => filestream?.Close());
-                this._IgnoredFiles.Add(destination);
-                this._IgnoredFolders.Add(Directory.GetParent(destination).FullName);
+                SetWatcherEvents(_OutputWatcher, false);
+            }
+
+            if (destination != null)
+            {
                 Directory.CreateDirectory(Directory.GetParent(destination).FullName);
-                File.Copy(e.FullPath, destination, true);
-                this._IgnoredFiles.Remove(destination);
-                this._IgnoredFolders.Remove(Directory.GetParent(destination).FullName);
+            }
+
+            switch (action)
+            {
+                case FileUtils.FileActions.Copy:
+                    if (!FileUtils.AreFilesIdentical(source, destination))
+                    {
+                        File.Copy(source, destination, true);
+                    }
+                    break;
+                case FileUtils.FileActions.Delete:
+                    File.Delete(source);
+                    break;
+                case FileUtils.FileActions.Move:
+                    File.Move(source, destination);
+                    break;
+                default:
+                    break;
+            }
+
+            if (e.ChangeType == WatcherChangeTypes.Created)
+            {
+                SetOtherWatcherEvents(value: true, isOutputFolderEvent: source.StartsWith(_OutputFolderPath));
+            }
+            else
+            {
+                SetWatcherEvents(_OutputWatcher, true);
             }
         }
 
-        private void ProcessCreatedFile(Change e, string destination, bool isOutputFolderEvent)
+        private void ProcessDirectory(Change e, string source, string destination, FileUtils.FileActions action)
         {
-            Console.WriteLine($"Processing file {e.FullPath} (created)");
-            FileUtils.OpenFilesAndWaitIfNeeded(e.FullPath, destination).ForEach(filestream => filestream?.Close());
-            this._IgnoredFiles.Add(destination);
-            Directory.CreateDirectory(Directory.GetParent(destination).FullName);
-            File.Copy(e.FullPath, destination, true);
-            this._IgnoredFiles.Remove(destination);
+            if (e.ChangeType == WatcherChangeTypes.Created)
+            {
+                SetOtherWatcherEvents(value: false, isOutputFolderEvent: e.FullPath.StartsWith(_OutputFolderPath));
+                Directory.CreateDirectory(destination);
+            }
+            else if (e.ChangeType == WatcherChangeTypes.Deleted)
+            {
+                _IgnoredFolders.Add(e.FullPath);
+            }
+            else
+            {
+                SetWatcherEvents(_OutputWatcher, false);
+            }
+            FileUtils.ProcessDirectoryRecursively(source, destination, action);
+            if (e.ChangeType == WatcherChangeTypes.Created)
+            {
+                SetOtherWatcherEvents(value: true, isOutputFolderEvent: e.FullPath.StartsWith(_OutputFolderPath));
+            }
+            else if (e.ChangeType == WatcherChangeTypes.Deleted && e.FullPath.StartsWith(_InputFolderPath))
+            {
+                _IgnoredFolders.Remove(e.FullPath);
+            }
+            else
+            {
+                SetWatcherEvents(_OutputWatcher, true);
+            }
         }
 
-        private void ProcessCreatedDirectory(Change e, string destination, bool isOutputFolderEvent)
+        private void SetOtherWatcherEvents(bool value, bool isOutputFolderEvent)
         {
-            Console.WriteLine($"Processing directory {e.FullPath} (created)");
-            this._IgnoredFolders.Add(destination);
-            Directory.CreateDirectory(destination);
-            FileUtils.ProcessDirectoryRecursively(e.FullPath, destination, FileUtils.FileActions.Copy);
-            this._IgnoredFolders.Remove(destination);
+            if (isOutputFolderEvent)
+            {
+                this._InputWatcher.EnableRaisingEvents = value;
+            }
+            else if (this._OutputWatcher != null)
+            {
+                this._OutputWatcher.EnableRaisingEvents = value;
+            }
         }
 
         private List<Change> RemoveDuplicates(List<Change> list)

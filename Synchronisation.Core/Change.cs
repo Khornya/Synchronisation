@@ -49,5 +49,6 @@ namespace Synchronisation.Core
         /// The old name.
         /// </value>
         public string OldName { get; set; }
+        public int RetryCount { get; set; }
     }
 }

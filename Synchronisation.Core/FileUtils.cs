@@ -1,9 +1,6 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
-using System.Runtime.CompilerServices;
-using System.Text;
 
 namespace Synchronisation.Core
 {
@@ -19,19 +16,26 @@ namespace Synchronisation.Core
         ///<summary>
         /// Processes files and directory structure recursively.
         ///</summary>
-        public static void ProcessDirectoryRecursively(string source, string dest, FileActions action)
+        public static void ProcessDirectoryRecursively(string source, string destination, FileActions action)
         {
             string[] files;
 
             if (action != FileActions.Delete)
             {
-                if (dest?.Length > 0 && dest[dest.Length - 1] != Path.DirectorySeparatorChar)
+                if (destination?.Length > 0 && destination[destination.Length - 1] != Path.DirectorySeparatorChar)
                 {
-                    dest += Path.DirectorySeparatorChar;
+                    destination += Path.DirectorySeparatorChar;
                 }
-                if (!Directory.Exists(dest))
+                if (!Directory.Exists(destination))
                 {
-                    Directory.CreateDirectory(dest);
+                    try
+                    {
+                        Directory.CreateDirectory(destination);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new Exception("Error while creating directory", ex);
+                    }
                 }
             }
 
@@ -41,45 +45,34 @@ namespace Synchronisation.Core
                 // Sub directories
                 if (Directory.Exists(file))
                 {
-                    string newDest = dest != null ? dest + Path.GetFileName(file) : null;
-                    ProcessDirectoryRecursively(file, newDest, action);
+                    string newDestination = destination != null ? destination + Path.GetFileName(file) : null;
+                    ProcessDirectoryRecursively(file, newDestination, action);
                 }
                 // Files in directory
                 else
                 {
-                    string destFilepath = action == FileActions.Delete ? null : dest + Path.GetFileName(file);
+                    string destFilepath = action == FileActions.Delete ? null : destination + Path.GetFileName(file);
                     if (action != FileActions.Delete || !File.Exists(destFilepath))
                     {
-                        OpenFilesAndWaitIfNeeded(file, destFilepath).ForEach(filestream => filestream?.Close());
-                        switch (action)
-                        {
-                            case FileActions.Copy:
-                                if (!AreFilesIdentical(file, destFilepath))
-                                {
-                                    File.Copy(file, destFilepath, true);
-                                }
-                                break;
-                            case FileActions.Delete:
-                                File.Delete(file);
-                                break;
-                            case FileActions.Move:
-                                File.Move(file, destFilepath);
-                                break;
-                            default:
-                                throw new ArgumentException();
-                        }
+                        ProcessOneFile(file, destFilepath, action);
                     }
                 }
             }
             if (action == FileActions.Delete || action == FileActions.Move)
             {
-                Directory.Delete(source);
+                try
+                {
+                    Directory.Delete(source);
+                } catch (Exception ex)
+                {
+                    throw new Exception("Error while deleting directory", ex);
+                }
             }
         }
 
         public static bool AreFilesIdentical(string file1, string file2)
         {
-            OpenFilesAndWaitIfNeeded(file1, file2).ForEach(filestream => filestream?.Close());
+            OpenFilesAndWaitIfNeeded(file1, file2).ForEach(filestream => filestream?.Dispose());
             try
             {
                 if (!File.Exists(file1) || !File.Exists(file2))
@@ -92,7 +85,8 @@ namespace Synchronisation.Core
                 {
                     file1Bytes = File.ReadAllBytes(file1);
                     file2Bytes = File.ReadAllBytes(file2);
-                } catch (Exception ex)
+                }
+                catch (Exception ex)
                 {
                     Console.WriteLine($"Error while reading {file1} and {file2}");
                     throw ex;
@@ -116,7 +110,8 @@ namespace Synchronisation.Core
                     }
                     return true;
                 }
-            } catch (Exception ex)
+            }
+            catch (Exception ex)
             {
                 Console.WriteLine("Erreur :" + ex.Message);
                 throw;
@@ -189,6 +184,8 @@ namespace Synchronisation.Core
 
                 if (DateTime.Now > startDateTime.AddMinutes(1))
                 {
+                    sourceFileStream.Dispose();
+                    destFileStream.Dispose();
                     throw new Exception("Délai d'attente dépassé, impossible d'ouvrir le(s) fichier(s).");
                 }
 
@@ -217,6 +214,50 @@ namespace Synchronisation.Core
                     else RemoveOrphans(path.Replace(destination, source), path);
                 }
             }
-        }        
+        }
+
+        internal static void ProcessOneFile(string source, string destination, FileActions action)
+        {
+            OpenFilesAndWaitIfNeeded(source, destination).ForEach(filestream => filestream?.Dispose());
+
+            switch (action)
+            {
+                case FileActions.Copy:
+                    if (!AreFilesIdentical(source, destination))
+                    {
+                        try
+                        {
+                            File.Copy(source, destination, true);
+                        }
+                        catch (Exception ex)
+                        {
+                            throw new Exception("Error while copying file", ex);
+                        }
+                    }
+                    break;
+                case FileActions.Delete:
+                    try
+                    {
+                        File.Delete(source);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new Exception("Error while deleting file", ex);
+                    }
+                    break;
+                case FileActions.Move:
+                    try
+                    {
+                        File.Move(source, destination);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new Exception("Error while moving file", ex);
+                    }
+                    break;
+                default:
+                    throw new ArgumentException();
+            }
+        }
     }
 }

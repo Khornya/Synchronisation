@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Data;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -10,7 +9,9 @@ namespace Synchronisation.Core
     public class FileSyncService
     {
         //TODO: loggers
-        //TODO: gestion des exceptions
+        //TODO: commentaires
+        //TODO: vérifier fonctionnement du service
+        //TODO : éviter startswith et replace
 
         #region Fields
 
@@ -51,6 +52,7 @@ namespace Synchronisation.Core
         private Thread _Worker;
         private FileSystemWatcher _OutputWatcher;
         private volatile bool _ShouldInterrupt;
+        private bool _Interrupted;
 
         #endregion
 
@@ -107,12 +109,23 @@ namespace Synchronisation.Core
 
                 try
                 {
+                    // On copie les fichiers du dossier prioritaire dans le dossier non prioritaire
                     FileUtils.ProcessDirectoryRecursively(this._InputFolderPath, this._OutputFolderPath, FileUtils.FileActions.Copy);
-                    FileUtils.RemoveOrphans(this._InputFolderPath, this._OutputFolderPath);
+                    if (_SyncMode == SyncMode.TwoWaySourceFirst || _SyncMode == SyncMode.TwoWayDestFirst)
+                    {
+                        // On copie les fichiers présents uniquement dans le dossier non prioritaire
+                        FileUtils.ProcessDirectoryRecursively(this._OutputFolderPath, this._InputFolderPath, FileUtils.FileActions.Copy);
+                    }
+                    if (_SyncMode == SyncMode.OneWay)
+                    {
+                        // On supprime les fichiers présents uniquement dans le dossier non prioritaire
+                        FileUtils.RemoveOrphans(this._InputFolderPath, this._OutputFolderPath);
+                    }
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine(ex.Message);
+                    throw new Exception("Unable to sync directories", ex);
                 }
 
                 //On initialise la liste des événements
@@ -132,7 +145,7 @@ namespace Synchronisation.Core
                 //Permet de surveiller les sous-dossiers.
                 this._InputWatcher.IncludeSubdirectories = true;
                 //Permet de surveiller uniquement les changements dans les noms des fichiers et des dossiers, et les modifications
-                this._InputWatcher.NotifyFilter = (NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.DirectoryName);
+                this._InputWatcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.DirectoryName;
                 //On s'abonne aux événements du Watcher.
                 this._InputWatcher.Created += this.Watcher_Event;
                 this._InputWatcher.Changed += this.Watcher_Event;
@@ -168,16 +181,110 @@ namespace Synchronisation.Core
             }
         }
 
+        /// <summary>
+        ///     Met en pause l'exécution du service.
+        /// </summary>
+        public void Pause()
+        {
+            this._ShouldInterrupt = true;
+            while (!_Interrupted)
+            {
+                Thread.Sleep(200);
+            }
+            SetWatcherEvents(_InputWatcher, value: false);
+            SetWatcherEvents(_OutputWatcher, value: false);
+            this._Events = new List<Change>();
+            this._IgnoredFolders = new List<string>();
+            this._IgnoredFiles = new List<string>();
+            Console.WriteLine("Service paused.");
+        }
+
+        /// <summary>
+        ///     Reprend l'exécution du service.
+        /// </summary>
+        public void Continue()
+        {
+            this._ShouldInterrupt = false;
+            SetWatcherEvents(_InputWatcher, value: true);
+            SetWatcherEvents(_OutputWatcher, value: true);
+            Console.WriteLine("Service resumed.");
+        }
+
+        /// <summary>
+        ///     Arrête l'exécution du service.
+        /// </summary>
+        public void Stop()
+        {
+            if (this._InputWatcher != null)
+            {
+                this._InputWatcher.Created -= this.Watcher_Event;
+                this._InputWatcher.Changed -= this.Watcher_Event;
+                this._InputWatcher.Deleted -= this.Watcher_Event;
+                this._InputWatcher.Renamed -= this.Watcher_Event;
+                this._InputWatcher.Error -= this.Watcher_Error;
+                this._InputWatcher.Dispose();
+            }
+            if (this._OutputWatcher != null)
+            {
+                this._OutputWatcher.Created -= this.Watcher_Event;
+                this._OutputWatcher.Changed -= this.Watcher_Event;
+                this._OutputWatcher.Deleted -= this.Watcher_Event;
+                this._OutputWatcher.Renamed -= this.Watcher_Event;
+                this._OutputWatcher.Error -= this.Watcher_Error;
+                this._OutputWatcher.Dispose();
+            }
+            this._ShouldInterrupt = true;
+            while (!_Interrupted)
+            {
+                Thread.Sleep(200);
+            }
+            _Events = new List<Change>();
+            _IgnoredFolders = new List<string>();
+            Console.WriteLine("Service stopped");
+        }
+
+        #endregion
+
+        /// <summary>
+        ///     Méthode déclenchée lors de l'ajout, de la modification ou de la suppression d'un fichier dans le répertoire d'entrée.
+        /// </summary>
+        /// <param name="sender">Instance qui a déclenché l'événement.</param>
+        /// <param name="e">Arguments de l'événements.</param>
+        private void Watcher_Event(object sender, FileSystemEventArgs e)
+        {
+            if (!_IgnoredFolders.Exists(path => e.FullPath.StartsWith(path)) && !_IgnoredFiles.Exists(path => e.FullPath == path))
+            {
+                lock (_Events)
+                {
+                    _Events.Add(new Change
+                    {
+                        ChangeType = e.ChangeType,
+                        FullPath = e.FullPath,
+                        Name = e.Name,
+                        OldFullPath = e.ChangeType == WatcherChangeTypes.Renamed ? ((RenamedEventArgs)e).OldFullPath : null,
+                        OldName = e.ChangeType == WatcherChangeTypes.Renamed ? ((RenamedEventArgs)e).OldName : null
+                    });
+                }
+            }
+        }
+
+        private void Watcher_Error(object sender, ErrorEventArgs e)
+        {
+            Console.WriteLine($"[FileSystemWatcherError] {e.GetException()}");
+        }
+
         private void processEvents(object obj)
         {
             while (true)
             {
                 if (_ShouldInterrupt)
                 {
+                    _Interrupted = true;
                     Thread.Sleep(1000);
                 }
                 else
                 {
+                    _Interrupted = false;
                     if (_Events.Count > 0)
                     {
                         Change e = _Events.First();
@@ -229,112 +336,20 @@ namespace Synchronisation.Core
                                     _Events.Add(e);
                                 }
                             }
-                            //finally
-                            //{
-                            //    _InputWatcher.EnableRaisingEvents = true;
-                            //    if (_OutputWatcher != null)
-                            //    {
-                            //        _OutputWatcher.EnableRaisingEvents = true;
-                            //    }
-                            //}
+                            finally
+                            {
+                                _IgnoredFiles = new List<string>();
+                                _IgnoredFolders = new List<string>();
+                                _InputWatcher.EnableRaisingEvents = true;
+                                if (_OutputWatcher != null)
+                                {
+                                    _OutputWatcher.EnableRaisingEvents = true;
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
-
-        /// <summary>
-        ///     Met en pause l'exécution du service.
-        /// </summary>
-        public void Pause()
-        {
-            this._ShouldInterrupt = true;
-            SetWatcherEvents(_InputWatcher, value: false);
-            SetWatcherEvents(_OutputWatcher, value: false);
-            this._Events = new List<Change>();
-            this._IgnoredFolders = new List<string>();
-            this._IgnoredFiles = new List<string>();
-            Console.WriteLine("Service paused.");
-        }
-
-        private void SetWatcherEvents(FileSystemWatcher watcher, bool value)
-        {
-            if (watcher != null)
-            {
-                watcher.EnableRaisingEvents = value;
-            }
-        }
-
-        /// <summary>
-        ///     Reprend l'exécution du service.
-        /// </summary>
-        public void Continue()
-        {
-            this._ShouldInterrupt = false;
-            SetWatcherEvents(_InputWatcher, value: true);
-            SetWatcherEvents(_OutputWatcher, value: true);
-            Console.WriteLine("Service resumed.");
-        }
-
-        /// <summary>
-        ///     Arrête l'exécution du service.
-        /// </summary>
-        public void Stop()
-        {
-            if (this._InputWatcher != null)
-            {
-                this._InputWatcher.Created -= this.Watcher_Event;
-                this._InputWatcher.Changed -= this.Watcher_Event;
-                this._InputWatcher.Deleted -= this.Watcher_Event;
-                this._InputWatcher.Renamed -= this.Watcher_Event;
-                this._InputWatcher.Error -= this.Watcher_Error;
-                this._InputWatcher.Dispose();
-                this._InputWatcher = null; // TODO: à revoir, le service n'est pas arrêté
-            }
-            if (this._OutputWatcher != null)
-            {
-                this._OutputWatcher.Created -= this.Watcher_Event;
-                this._OutputWatcher.Changed -= this.Watcher_Event;
-                this._OutputWatcher.Deleted -= this.Watcher_Event;
-                this._OutputWatcher.Renamed -= this.Watcher_Event;
-                this._OutputWatcher.Error -= this.Watcher_Error;
-                this._OutputWatcher.Dispose();
-                this._OutputWatcher = null; // TODO: à revoir, le service n'est pas arrêté
-            }
-            this._ShouldInterrupt = true;
-            this._Events = new List<Change>();
-            this._IgnoredFolders = new List<string>();
-            Console.WriteLine("Service stopped");
-        }
-
-        #endregion
-
-        /// <summary>
-        ///     Méthode déclenchée lors de l'ajout, de la modification ou de la suppression d'un fichier dans le répertoire d'entrée.
-        /// </summary>
-        /// <param name="sender">Instance qui a déclenché l'événement.</param>
-        /// <param name="e">Arguments de l'événements.</param>
-        private void Watcher_Event(object sender, FileSystemEventArgs e)
-        {
-            if (!this._IgnoredFolders.Exists(path => e.FullPath.StartsWith(path)) && !this._IgnoredFiles.Exists(path => e.FullPath == path)) //TODO : éviter startswith
-            {
-                lock (this._Events)
-                {
-                    this._Events.Add(new Change
-                    {
-                        ChangeType = e.ChangeType,
-                        FullPath = e.FullPath,
-                        Name = e.Name,
-                        OldFullPath = e.ChangeType == WatcherChangeTypes.Renamed ? ((RenamedEventArgs)e).OldFullPath : null,
-                        OldName = e.ChangeType == WatcherChangeTypes.Renamed ? ((RenamedEventArgs)e).OldName : null
-                    });
-                }
-            }
-        }
-
-        private void Watcher_Error(object sender, ErrorEventArgs e)
-        {
-            Console.WriteLine($"[FileSystemWatcherError] {e.GetException()}");
         }
 
         private void process(Change e)
@@ -395,7 +410,8 @@ namespace Synchronisation.Core
                         if (isOutputFolderEvent)
                         {
                             Console.WriteLine($"Processing file {destination} (renamed), reverting");
-                        } else
+                        }
+                        else
                         {
                             Console.WriteLine($"Processing file {source} (renamed), renaming {destination}");
                         }
@@ -440,7 +456,6 @@ namespace Synchronisation.Core
 
         private void ProcessFile(Change e, string source, string destination, FileUtils.FileActions action)
         {
-            FileUtils.OpenFilesAndWaitIfNeeded(source, destination).ForEach(filestream => filestream?.Close());
             if (e.ChangeType == WatcherChangeTypes.Created)
             {
                 SetOtherWatcherEvents(value: false, isOutputFolderEvent: source.StartsWith(_OutputFolderPath));
@@ -452,26 +467,17 @@ namespace Synchronisation.Core
 
             if (destination != null)
             {
-                Directory.CreateDirectory(Directory.GetParent(destination).FullName);
+                try
+                {
+                    Directory.CreateDirectory(Directory.GetParent(destination).FullName);
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception("Error while creating directory", ex);
+                }
             }
 
-            switch (action)
-            {
-                case FileUtils.FileActions.Copy:
-                    if (!FileUtils.AreFilesIdentical(source, destination))
-                    {
-                        File.Copy(source, destination, true);
-                    }
-                    break;
-                case FileUtils.FileActions.Delete:
-                    File.Delete(source);
-                    break;
-                case FileUtils.FileActions.Move:
-                    File.Move(source, destination);
-                    break;
-                default:
-                    break;
-            }
+            FileUtils.ProcessOneFile(source, destination, action);
 
             if (e.ChangeType == WatcherChangeTypes.Created)
             {
@@ -488,7 +494,14 @@ namespace Synchronisation.Core
             if (e.ChangeType == WatcherChangeTypes.Created)
             {
                 SetOtherWatcherEvents(value: false, isOutputFolderEvent: e.FullPath.StartsWith(_OutputFolderPath));
-                Directory.CreateDirectory(destination);
+                try
+                {
+                    Directory.CreateDirectory(destination);
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception("Error while creating directory", ex);
+                }
             }
             else if (e.ChangeType == WatcherChangeTypes.Deleted)
             {
@@ -527,20 +540,28 @@ namespace Synchronisation.Core
 
         private List<Change> RemoveDuplicates(List<Change> list)
         {
-            list = list.OrderBy(z => z.Name).OrderBy(z => z.FullPath).ToList();
+            list = list.OrderBy(change => change.Name).OrderBy(change => change.FullPath).ToList();
             List<Change> newList = new List<Change>();
-            String lastName = "";
-            String lastFullPath = "+";
-            foreach (Change fswa in list)
+            string lastName = "";
+            string lastFullPath = "+";
+            foreach (Change change in list)
             {
-                if (fswa.Name != lastName || fswa.FullPath != lastFullPath)
+                if (change.Name != lastName || change.FullPath != lastFullPath)
                 {
-                    newList.Add(fswa);
-                    lastName = fswa.Name;
-                    lastFullPath = fswa.FullPath;
+                    newList.Add(change);
+                    lastName = change.Name;
+                    lastFullPath = change.FullPath;
                 }
             }
             return newList;
+        }
+
+        private void SetWatcherEvents(FileSystemWatcher watcher, bool value)
+        {
+            if (watcher != null)
+            {
+                watcher.EnableRaisingEvents = value;
+            }
         }
 
         #endregion

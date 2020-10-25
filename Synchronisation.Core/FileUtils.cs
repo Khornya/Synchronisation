@@ -13,9 +13,12 @@ namespace Synchronisation.Core
             Move
         }
 
-        ///<summary>
-        /// Processes files and directory structure recursively.
-        ///</summary>
+        /// <summary>
+        ///     Traite un dossier et son contenu.
+        /// </summary>
+        /// <param name="source">Le chemin du dossier source.</param>
+        /// <param name="destination">Le chemin du dossier de destination.</param>
+        /// <param name="action">L'action à effectuer.</param>
         public static void ProcessDirectoryRecursively(string source, string destination, FileActions action)
         {
             string[] files;
@@ -70,6 +73,12 @@ namespace Synchronisation.Core
             }
         }
 
+        /// <summary>
+        ///     Vérifie si deux fichiers sont identiques bit à bit.
+        /// </summary>
+        /// <param name="file1">Le chemin du premier fichier</param>
+        /// <param name="file2">Le chemin du second fichier</param>
+        /// <returns>true si les deux fichiers sont identiques, false sinon</returns>
         public static bool AreFilesIdentical(string file1, string file2)
         {
             OpenFilesAndWaitIfNeeded(file1, file2).ForEach(filestream => filestream?.Dispose());
@@ -196,12 +205,14 @@ namespace Synchronisation.Core
             return fileStreams;
         }
 
-        // Remove files and folders from the mirror that dont exist in the source folder
+        /// <summary>
+        ///     Supprime les fichiers et sous-dossiers du dossier de destination qui n'existent pas dans le dossier source
+        /// </summary>
+        /// <param name="source">Le chemin du dossier source</param>
+        /// <param name="destination">Le chemin du dossier de destination</param>
         public static void RemoveOrphans(string source, string destination)
         {
             String[] ioData = Directory.GetFileSystemEntries(destination);
-
-            // Delete orphan folders and files
             foreach (string path in ioData)
             {
                 if (File.Exists(path))
@@ -216,6 +227,12 @@ namespace Synchronisation.Core
             }
         }
 
+        /// <summary>
+        ///     Traite un fichier.
+        /// </summary>
+        /// <param name="source">Le chemin du fichier source.</param>
+        /// <param name="destination">Le chemin du fichier de destination.</param>
+        /// <param name="action">L'action à effectuer</param>
         internal static void ProcessOneFile(string source, string destination, FileActions action)
         {
             OpenFilesAndWaitIfNeeded(source, destination).ForEach(filestream => filestream?.Dispose());

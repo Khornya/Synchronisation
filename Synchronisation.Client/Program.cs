@@ -26,6 +26,14 @@ namespace Synchronisation.Client
 
             Console.ReadLine();
 
+            service.Pause();
+
+            Console.ReadLine();
+
+            service.Continue();
+
+            Console.ReadLine();
+
             service.Stop();
 
             Console.ReadLine();

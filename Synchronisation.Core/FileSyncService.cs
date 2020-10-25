@@ -9,11 +9,7 @@ namespace Synchronisation.Core
 {
     public class FileSyncService
     {
-        //TODO: loggers
-        //TODO: commentaires
-        //TODO: vérifier fonctionnement du service
-        //TODO : éviter startswith et replace
-
+        
         #region Fields
 
         /// <summary>
@@ -31,6 +27,9 @@ namespace Synchronisation.Core
         /// </summary>
         private readonly SyncMode _SyncMode;
 
+        /// <summary>
+        ///     Les différents modes de synchronisation disponibles
+        /// </summary>
         public enum SyncMode
         {
             OneWay,
@@ -39,20 +38,43 @@ namespace Synchronisation.Core
         }
 
         /// <summary>
+        ///     Liste des événements.
+        /// </summary>
+        private List<Change> _Events;
+
+        /// <summary>
+        ///     Liste des répertoires ignorés
+        /// </summary>
+        private List<string> _IgnoredFolders;
+
+        /// <summary>
+        ///     Liste des fichiers ignorés
+        /// </summary>
+        private List<string> _IgnoredFiles;
+
+        /// <summary>
+        ///     Le thread qui traite les événements.
+        /// </summary>
+        private Thread _Worker;
+
+        /// <summary>
         ///     Classe d'écoute du répertoire d'entrée.
         /// </summary>
         private FileSystemWatcher _InputWatcher;
 
         /// <summary>
-        ///     Liste des événements.
+        ///     Classe d'écoute du répertoire de sortie
         /// </summary>
-        private List<Change> _Events;
-
-        private List<string> _IgnoredFolders;
-        private List<string> _IgnoredFiles;
-        private Thread _Worker;
         private FileSystemWatcher _OutputWatcher;
+
+        /// <summary>
+        ///     true si le traitement des événements doit être interrompu, false sinon
+        /// </summary>
         private volatile bool _ShouldInterrupt;
+
+        /// <summary>
+        ///     true si le traitement des événements est interrompu, false sinon
+        /// </summary>
         private bool _Interrupted;
 
         #endregion
@@ -108,26 +130,8 @@ namespace Synchronisation.Core
                     throw new Exception("Impossible de créer le dossier d'entrée ou de sortie", ex);
                 }
 
-                try
-                {
-                    // On copie les fichiers du dossier prioritaire dans le dossier non prioritaire
-                    FileUtils.ProcessDirectoryRecursively(this._InputFolderPath, this._OutputFolderPath, FileUtils.FileActions.Copy);
-                    if (_SyncMode == SyncMode.TwoWaySourceFirst || _SyncMode == SyncMode.TwoWayDestFirst)
-                    {
-                        // On copie les fichiers présents uniquement dans le dossier non prioritaire
-                        FileUtils.ProcessDirectoryRecursively(this._OutputFolderPath, this._InputFolderPath, FileUtils.FileActions.Copy);
-                    }
-                    if (_SyncMode == SyncMode.OneWay)
-                    {
-                        // On supprime les fichiers présents uniquement dans le dossier non prioritaire
-                        FileUtils.RemoveOrphans(this._InputFolderPath, this._OutputFolderPath);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Loggers.WriteError(ex.Message);
-                    throw new Exception("Unable to sync directories", ex);
-                }
+                // On synchronise les dossiers
+                sync();
 
                 //On initialise la liste des événements
                 this._Events = new List<Change>();
@@ -183,6 +187,33 @@ namespace Synchronisation.Core
         }
 
         /// <summary>
+        ///     Synchronise le dossier d'entrée et le dossier de sortie selon le mode de synchronisation choisi
+        /// </summary>
+        private void sync()
+        {
+            try
+            {
+                // On copie les fichiers du dossier prioritaire dans le dossier non prioritaire
+                FileUtils.ProcessDirectoryRecursively(this._InputFolderPath, this._OutputFolderPath, FileUtils.FileActions.Copy);
+                if (_SyncMode == SyncMode.TwoWaySourceFirst || _SyncMode == SyncMode.TwoWayDestFirst)
+                {
+                    // On copie les fichiers présents uniquement dans le dossier non prioritaire
+                    FileUtils.ProcessDirectoryRecursively(this._OutputFolderPath, this._InputFolderPath, FileUtils.FileActions.Copy);
+                }
+                if (_SyncMode == SyncMode.OneWay)
+                {
+                    // On supprime les fichiers présents uniquement dans le dossier non prioritaire
+                    FileUtils.RemoveOrphans(this._InputFolderPath, this._OutputFolderPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                Loggers.WriteError(ex.Message);
+                throw new Exception("Unable to sync directories", ex);
+            }
+        }
+
+        /// <summary>
         ///     Met en pause l'exécution du service.
         /// </summary>
         public void Pause()
@@ -206,6 +237,7 @@ namespace Synchronisation.Core
         public void Continue()
         {
             this._ShouldInterrupt = false;
+            sync();
             SetWatcherEvents(_InputWatcher, value: true);
             SetWatcherEvents(_OutputWatcher, value: true);
             Loggers.WriteInformation("Service resumed.");
@@ -269,12 +301,20 @@ namespace Synchronisation.Core
             }
         }
 
+        /// <summary>
+        ///     Méthode déclenchée en cas d'erreur du FileSystemWatcher
+        /// </summary>
+        /// <param name="sender">Instance qui a déclenché l'événement.</param>
+        /// <param name="e">Arguments de l'événements.</param>
         private void Watcher_Error(object sender, ErrorEventArgs e)
         {
-            Loggers.WriteInformation($"[FileSystemWatcherError] {e.GetException()}");
+            Loggers.WriteError($"[FileSystemWatcherError] {e.GetException()}");
         }
 
-        private void processEvents(object obj)
+        /// <summary>
+        ///     Traite les liste des événements au fur et à mesure
+        /// </summary>
+        private void processEvents()
         {
             while (true)
             {
@@ -308,7 +348,7 @@ namespace Synchronisation.Core
                                     {
                                         lock (_Events)
                                         {
-                                            // Remove all "Created" and "Changed" events of child folders and files from the master list
+                                            // On retire tous les événements "Created" et "Changed" des sous-dossiers et des fichiers de la liste des événements
                                             _Events = _Events.Where(s => (s.ChangeType == WatcherChangeTypes.Created || s.ChangeType == WatcherChangeTypes.Changed) && s.FullPath.Contains(e.FullPath) == false).ToList();
                                         }
                                     }
@@ -316,7 +356,7 @@ namespace Synchronisation.Core
                                     {
                                         lock (_Events)
                                         {
-                                            // Remove all "Changed" events for this file from the master list
+                                            // On retire tous les événements "Changed" pour ce fichier de la liste des événements
                                             _Events = _Events.Where(s => (s.ChangeType != WatcherChangeTypes.Changed && s.FullPath != e.FullPath)).ToList();
                                         }
                                     }
@@ -353,6 +393,10 @@ namespace Synchronisation.Core
             }
         }
 
+        /// <summary>
+        ///     Traite un événement
+        /// </summary>
+        /// <param name="e">L'événement à traiter.</param>
         private void process(Change e)
         {
             string source;
@@ -455,6 +499,13 @@ namespace Synchronisation.Core
             }
         }
 
+        /// <summary>
+        ///     Traite un fichier.
+        /// </summary>
+        /// <param name="e">L'événement à l'origine du traitement.</param>
+        /// <param name="source">Le chemin du fichier source.</param>
+        /// <param name="destination">Le chemin du fichier de destination.</param>
+        /// <param name="action">L'action à effectuer.</param>
         private void ProcessFile(Change e, string source, string destination, FileUtils.FileActions action)
         {
             if (e.ChangeType == WatcherChangeTypes.Created)
@@ -490,8 +541,16 @@ namespace Synchronisation.Core
             }
         }
 
+        /// <summary>
+        ///     Traite un dossier.
+        /// </summary>
+        /// <param name="e">L'événement à l'origine du traitement.</param>
+        /// <param name="source">Le chemin du dossier source.</param>
+        /// <param name="destination">Le chemin du dossier de destination.</param>
+        /// <param name="action">L'action à effectuer.</param>
         private void ProcessDirectory(Change e, string source, string destination, FileUtils.FileActions action)
         {
+            String directoryPath = e.FullPath.EndsWith(Path.DirectorySeparatorChar.ToString()) ? e.FullPath : e.FullPath + Path.DirectorySeparatorChar;
             if (e.ChangeType == WatcherChangeTypes.Created)
             {
                 SetOtherWatcherEvents(value: false, isOutputFolderEvent: e.FullPath.StartsWith(_OutputFolderPath));
@@ -506,7 +565,7 @@ namespace Synchronisation.Core
             }
             else if (e.ChangeType == WatcherChangeTypes.Deleted)
             {
-                _IgnoredFolders.Add(e.FullPath);
+                _IgnoredFolders.Add(directoryPath);
             }
             else
             {
@@ -519,7 +578,7 @@ namespace Synchronisation.Core
             }
             else if (e.ChangeType == WatcherChangeTypes.Deleted && e.FullPath.StartsWith(_InputFolderPath))
             {
-                _IgnoredFolders.Remove(e.FullPath);
+                _IgnoredFolders.Remove(directoryPath);
             }
             else
             {
@@ -527,18 +586,11 @@ namespace Synchronisation.Core
             }
         }
 
-        private void SetOtherWatcherEvents(bool value, bool isOutputFolderEvent)
-        {
-            if (isOutputFolderEvent)
-            {
-                this._InputWatcher.EnableRaisingEvents = value;
-            }
-            else if (this._OutputWatcher != null)
-            {
-                this._OutputWatcher.EnableRaisingEvents = value;
-            }
-        }
-
+        /// <summary>
+        ///     Supprime les doublons d'une liste d'événements
+        /// </summary>
+        /// <param name="list">La liste d'événements</param>
+        /// <returns>La liste sans les doublons.</returns>
         private List<Change> RemoveDuplicates(List<Change> list)
         {
             list = list.OrderBy(change => change.Name).OrderBy(change => change.FullPath).ToList();
@@ -557,11 +609,33 @@ namespace Synchronisation.Core
             return newList;
         }
 
+        /// <summary>
+        ///     Active ou désactive l'écoute sur un watcher
+        /// </summary>
+        /// <param name="watcher">Le watcher à modifier</param>
+        /// <param name="value">true pour activer l'écoute, false pour la désactiver</param>
         private void SetWatcherEvents(FileSystemWatcher watcher, bool value)
         {
             if (watcher != null)
             {
                 watcher.EnableRaisingEvents = value;
+            }
+        }
+
+        /// <summary>
+        ///     Active ou désactive l'écoute sur l'autre watcher.
+        /// </summary>
+        /// <param name="value">true pour activer l'écoute, false pour la désactiver</param>
+        /// <param name="isOutputFolderEvent">true si l'événement d'origine provient du watcher du dossier de destination, false sinon</param>
+        private void SetOtherWatcherEvents(bool value, bool isOutputFolderEvent)
+        {
+            if (isOutputFolderEvent)
+            {
+                this._InputWatcher.EnableRaisingEvents = value;
+            }
+            else if (this._OutputWatcher != null)
+            {
+                this._OutputWatcher.EnableRaisingEvents = value;
             }
         }
 

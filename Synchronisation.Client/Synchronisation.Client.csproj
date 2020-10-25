@@ -6,6 +6,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\M2I.Diagnostics.EventLog\M2I.Diagnostics.EventLog.csproj" />
+    <ProjectReference Include="..\M2I.Diagnostics\M2I.Diagnostics.csproj" />
     <ProjectReference Include="..\Synchronisation.Core\Synchronisation.Core.csproj" />
   </ItemGroup>
 

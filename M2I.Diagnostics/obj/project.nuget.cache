@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "2A0CS16dxY+rWtAKOaE79LZD5VBysjH1zAgZGJNh6MJFyscSIhz3sfgDE0uLv3lvFPT8ijsk/KmYd224IFy+/g==",
+  "success": true,
+  "projectFilePath": "D:\\GoogleDrive\\M1\\.NET\\Synchronisation\\M2I.Diagnostics\\M2I.Diagnostics.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\marin\\.nuget\\packages\\microsoft.netcore.platforms\\1.1.0\\microsoft.netcore.platforms.1.1.0.nupkg.sha512",
+    "C:\\Users\\marin\\.nuget\\packages\\netstandard.library\\2.0.3\\netstandard.library.2.0.3.nupkg.sha512"
+  ],
+  "logs": []
+}

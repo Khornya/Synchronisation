@@ -1,4 +1,5 @@
-﻿using System;
+﻿using M2I.Diagnostics;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -91,7 +92,7 @@ namespace Synchronisation.Core
         {
             if (this._InputWatcher == null)
             {
-                Console.WriteLine("Starting service...");
+                Loggers.WriteInformation("Starting service...");
 
                 try
                 {
@@ -102,7 +103,7 @@ namespace Synchronisation.Core
                 catch (Exception ex)
                 {
                     //En cas d'erreur, on log l'exception.
-                    Console.WriteLine(ex.ToString());
+                    Loggers.WriteError(ex.ToString());
                     //On relance l'exception pour arrêter le démarrage du service.
                     throw new Exception("Impossible de créer le dossier d'entrée ou de sortie", ex);
                 }
@@ -124,7 +125,7 @@ namespace Synchronisation.Core
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine(ex.Message);
+                    Loggers.WriteError(ex.Message);
                     throw new Exception("Unable to sync directories", ex);
                 }
 
@@ -177,7 +178,7 @@ namespace Synchronisation.Core
                     this._OutputWatcher.EnableRaisingEvents = true;
                 }
 
-                Console.WriteLine("Service started.");
+                Loggers.WriteInformation("Service started.");
             }
         }
 
@@ -196,7 +197,7 @@ namespace Synchronisation.Core
             this._Events = new List<Change>();
             this._IgnoredFolders = new List<string>();
             this._IgnoredFiles = new List<string>();
-            Console.WriteLine("Service paused.");
+            Loggers.WriteInformation("Service paused.");
         }
 
         /// <summary>
@@ -207,7 +208,7 @@ namespace Synchronisation.Core
             this._ShouldInterrupt = false;
             SetWatcherEvents(_InputWatcher, value: true);
             SetWatcherEvents(_OutputWatcher, value: true);
-            Console.WriteLine("Service resumed.");
+            Loggers.WriteInformation("Service resumed.");
         }
 
         /// <summary>
@@ -240,7 +241,7 @@ namespace Synchronisation.Core
             }
             _Events = new List<Change>();
             _IgnoredFolders = new List<string>();
-            Console.WriteLine("Service stopped");
+            Loggers.WriteInformation("Service stopped");
         }
 
         #endregion
@@ -270,7 +271,7 @@ namespace Synchronisation.Core
 
         private void Watcher_Error(object sender, ErrorEventArgs e)
         {
-            Console.WriteLine($"[FileSystemWatcherError] {e.GetException()}");
+            Loggers.WriteInformation($"[FileSystemWatcherError] {e.GetException()}");
         }
 
         private void processEvents(object obj)
@@ -329,7 +330,7 @@ namespace Synchronisation.Core
                             }
                             catch (Exception ex)
                             {
-                                Console.WriteLine($"Erreur pendant le traitement de {e.FullPath} ({e.ChangeType}) : {ex.Message}");
+                                Loggers.WriteError($"Erreur pendant le traitement de {e.FullPath} ({e.ChangeType}) : {ex.Message}");
                                 e.RetryCount++;
                                 lock (_Events)
                                 {
@@ -364,12 +365,12 @@ namespace Synchronisation.Core
                     destination = isOutputFolderEvent ? e.FullPath.Replace(_OutputFolderPath, _InputFolderPath) : e.FullPath.Replace(_InputFolderPath, _OutputFolderPath); // éviter replace
                     if (Directory.Exists(e.FullPath))
                     {
-                        Console.WriteLine($"Processing directory {source} (created)");
+                        Loggers.WriteInformation($"Processing directory {source} (created)");
                         ProcessDirectory(e, source, destination, FileUtils.FileActions.Copy);
                     }
                     else
                     {
-                        Console.WriteLine($"Processing file {source} (created)");
+                        Loggers.WriteInformation($"Processing file {source} (created)");
                         ProcessFile(e, source, destination, FileUtils.FileActions.Copy);
                     }
                     break;
@@ -380,11 +381,11 @@ namespace Synchronisation.Core
                     {
                         if (isOutputFolderEvent)
                         {
-                            Console.WriteLine($"Processing file {destination} (changed), recovering from {source}");
+                            Loggers.WriteInformation($"Processing file {destination} (changed), recovering from {source}");
                         }
                         else
                         {
-                            Console.WriteLine($"Processing file {source} (changed)");
+                            Loggers.WriteInformation($"Processing file {source} (changed)");
                         }
                         ProcessFile(e, source, destination, FileUtils.FileActions.Copy);
                     }
@@ -397,11 +398,11 @@ namespace Synchronisation.Core
                     {
                         if (isOutputFolderEvent)
                         {
-                            Console.WriteLine($"Processing directory {destination} (renamed), reverting");
+                            Loggers.WriteInformation($"Processing directory {destination} (renamed), reverting");
                         }
                         else
                         {
-                            Console.WriteLine($"Processing directory {source} (renamed), renaming {destination}");
+                            Loggers.WriteInformation($"Processing directory {source} (renamed), renaming {destination}");
                         }
                         ProcessDirectory(e, source, destination, FileUtils.FileActions.Move);
                     }
@@ -409,11 +410,11 @@ namespace Synchronisation.Core
                     {
                         if (isOutputFolderEvent)
                         {
-                            Console.WriteLine($"Processing file {destination} (renamed), reverting");
+                            Loggers.WriteInformation($"Processing file {destination} (renamed), reverting");
                         }
                         else
                         {
-                            Console.WriteLine($"Processing file {source} (renamed), renaming {destination}");
+                            Loggers.WriteInformation($"Processing file {source} (renamed), renaming {destination}");
                         }
                         ProcessFile(e, source, destination, FileUtils.FileActions.Move);
                     }
@@ -425,12 +426,12 @@ namespace Synchronisation.Core
                     {
                         if (Directory.Exists(source))
                         {
-                            Console.WriteLine($"Processing directory {destination} (deleted), recovering from {source}");
+                            Loggers.WriteInformation($"Processing directory {destination} (deleted), recovering from {source}");
                             ProcessDirectory(e, source, destination, FileUtils.FileActions.Copy);
                         }
                         else if (File.Exists(source))
                         {
-                            Console.WriteLine($"Processing file {destination} (deleted), recovering from {source}");
+                            Loggers.WriteInformation($"Processing file {destination} (deleted), recovering from {source}");
                             ProcessFile(e, source, destination, FileUtils.FileActions.Copy);
                         }
                     }
@@ -438,18 +439,18 @@ namespace Synchronisation.Core
                     {
                         if (Directory.Exists(destination))
                         {
-                            Console.WriteLine($"Processing directory {source} (deleted), deleting {destination}");
+                            Loggers.WriteInformation($"Processing directory {source} (deleted), deleting {destination}");
                             ProcessDirectory(e, destination, null, FileUtils.FileActions.Delete);
                         }
                         else if (File.Exists(destination))
                         {
-                            Console.WriteLine($"Processing file {source} (deleted), deleting {destination}");
+                            Loggers.WriteInformation($"Processing file {source} (deleted), deleting {destination}");
                             ProcessFile(e, destination, null, FileUtils.FileActions.Delete);
                         }
                     }
                     break;
                 default:
-                    Console.WriteLine("Unsupported change type");
+                    Loggers.WriteError("Unsupported change type");
                     break;
             }
         }

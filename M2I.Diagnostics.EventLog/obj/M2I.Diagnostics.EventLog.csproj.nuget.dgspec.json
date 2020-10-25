@@ -1,0 +1,126 @@
+{
+  "format": 1,
+  "restore": {
+    "D:\\GoogleDrive\\M1\\.NET\\Synchronisation\\M2I.Diagnostics.EventLog\\M2I.Diagnostics.EventLog.csproj": {}
+  },
+  "projects": {
+    "D:\\GoogleDrive\\M1\\.NET\\Synchronisation\\M2I.Diagnostics.EventLog\\M2I.Diagnostics.EventLog.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "D:\\GoogleDrive\\M1\\.NET\\Synchronisation\\M2I.Diagnostics.EventLog\\M2I.Diagnostics.EventLog.csproj",
+        "projectName": "M2I.Diagnostics.EventLog",
+        "projectPath": "D:\\GoogleDrive\\M1\\.NET\\Synchronisation\\M2I.Diagnostics.EventLog\\M2I.Diagnostics.EventLog.csproj",
+        "packagesPath": "C:\\Users\\marin\\.nuget\\packages\\",
+        "outputPath": "D:\\GoogleDrive\\M1\\.NET\\Synchronisation\\M2I.Diagnostics.EventLog\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\marin\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        ],
+        "originalTargetFrameworks": [
+          "netstandard2.0"
+        ],
+        "sources": {
+          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "netstandard2.0": {
+            "projectReferences": {
+              "D:\\GoogleDrive\\M1\\.NET\\Synchronisation\\M2I.Diagnostics\\M2I.Diagnostics.csproj": {
+                "projectPath": "D:\\GoogleDrive\\M1\\.NET\\Synchronisation\\M2I.Diagnostics\\M2I.Diagnostics.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        }
+      },
+      "frameworks": {
+        "netstandard2.0": {
+          "dependencies": {
+            "NETStandard.Library": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.0.3, )",
+              "autoReferenced": true
+            },
+            "System.Diagnostics.EventLog": {
+              "target": "Package",
+              "version": "[4.5.0, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\3.1.402\\RuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "D:\\GoogleDrive\\M1\\.NET\\Synchronisation\\M2I.Diagnostics\\M2I.Diagnostics.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "D:\\GoogleDrive\\M1\\.NET\\Synchronisation\\M2I.Diagnostics\\M2I.Diagnostics.csproj",
+        "projectName": "M2I.Diagnostics",
+        "projectPath": "D:\\GoogleDrive\\M1\\.NET\\Synchronisation\\M2I.Diagnostics\\M2I.Diagnostics.csproj",
+        "packagesPath": "C:\\Users\\marin\\.nuget\\packages\\",
+        "outputPath": "D:\\GoogleDrive\\M1\\.NET\\Synchronisation\\M2I.Diagnostics\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\marin\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        ],
+        "originalTargetFrameworks": [
+          "netstandard2.0"
+        ],
+        "sources": {
+          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "netstandard2.0": {
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        }
+      },
+      "frameworks": {
+        "netstandard2.0": {
+          "dependencies": {
+            "NETStandard.Library": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.0.3, )",
+              "autoReferenced": true
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\3.1.402\\RuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}

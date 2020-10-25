@@ -1,4 +1,6 @@
-﻿using Synchronisation.Core;
+﻿using M2I.Diagnostics;
+using M2I.Diagnostics.EventLog;
+using Synchronisation.Core;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -31,6 +33,15 @@ namespace Synchronisation.Service
         public Service1()
         {
             this.InitializeComponent();
+            Loggers.AvaillableLoggers.Add(new FileLogger()
+            {
+                Source = ".\\logfile.log"
+            });
+            Loggers.AvaillableLoggers.Add(new EventLogger()
+            {
+                Name = "Synchronization Service",
+                Source = "Synchronization Service"
+            });
             this._Service = new FileSyncService(ConfigurationManager.AppSettings.Get("Folder1"), ConfigurationManager.AppSettings.Get("Folder2"), ConfigurationManager.AppSettings.Get("SyncMode"));
             //Permet d'accepter la mise en pause et la reprise du service.
             this.CanPauseAndContinue = true;

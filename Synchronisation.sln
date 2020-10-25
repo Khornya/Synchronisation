@@ -5,9 +5,13 @@ VisualStudioVersion = 16.0.30503.244
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synchronisation.Service", "Synchronisation.Service\Synchronisation.Service.csproj", "{D5DAAD7B-1CD4-40DE-B10B-DD887F38BFC6}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synchronisation.Client", "Synchronisation.Client\Synchronisation.Client.csproj", "{4C00B9A9-E58D-44D3-BEE6-6D5D463760D1}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Synchronisation.Client", "Synchronisation.Client\Synchronisation.Client.csproj", "{4C00B9A9-E58D-44D3-BEE6-6D5D463760D1}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Synchronisation.Core", "Synchronisation.Core\Synchronisation.Core.csproj", "{74FBDBA5-8118-4375-85EF-BDFF153CF792}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Synchronisation.Core", "Synchronisation.Core\Synchronisation.Core.csproj", "{74FBDBA5-8118-4375-85EF-BDFF153CF792}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "M2I.Diagnostics", "M2I.Diagnostics\M2I.Diagnostics.csproj", "{1C74E9E4-B7AF-4803-94BC-EB346B6B6ADD}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "M2I.Diagnostics.EventLog", "M2I.Diagnostics.EventLog\M2I.Diagnostics.EventLog.csproj", "{FD3B9647-8EE9-4123-BA0F-B3A35BF930C0}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -27,6 +31,14 @@ Global
 		{74FBDBA5-8118-4375-85EF-BDFF153CF792}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{74FBDBA5-8118-4375-85EF-BDFF153CF792}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{74FBDBA5-8118-4375-85EF-BDFF153CF792}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1C74E9E4-B7AF-4803-94BC-EB346B6B6ADD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1C74E9E4-B7AF-4803-94BC-EB346B6B6ADD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1C74E9E4-B7AF-4803-94BC-EB346B6B6ADD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1C74E9E4-B7AF-4803-94BC-EB346B6B6ADD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FD3B9647-8EE9-4123-BA0F-B3A35BF930C0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FD3B9647-8EE9-4123-BA0F-B3A35BF930C0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FD3B9647-8EE9-4123-BA0F-B3A35BF930C0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FD3B9647-8EE9-4123-BA0F-B3A35BF930C0}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

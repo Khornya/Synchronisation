@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "dgSpecHash": "Q+uta4NeuGdedqAZpaDcKq+MPqxkScsRj4sd4PEs5qFwEPpeRMQ/IBV9WpLP3qoAniiqhRwycZBT8uxIWhBeHQ==",
+  "success": true,
+  "projectFilePath": "D:\\GoogleDrive\\M1\\.NET\\Synchronisation\\M2I.Diagnostics.EventLog\\M2I.Diagnostics.EventLog.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\marin\\.nuget\\packages\\microsoft.netcore.platforms\\1.1.0\\microsoft.netcore.platforms.1.1.0.nupkg.sha512",
+    "C:\\Users\\marin\\.nuget\\packages\\netstandard.library\\2.0.3\\netstandard.library.2.0.3.nupkg.sha512",
+    "C:\\Users\\marin\\.nuget\\packages\\system.diagnostics.eventlog\\4.5.0\\system.diagnostics.eventlog.4.5.0.nupkg.sha512",
+    "C:\\Users\\marin\\.nuget\\packages\\system.security.accesscontrol\\4.5.0\\system.security.accesscontrol.4.5.0.nupkg.sha512",
+    "C:\\Users\\marin\\.nuget\\packages\\system.security.permissions\\4.5.0\\system.security.permissions.4.5.0.nupkg.sha512",
+    "C:\\Users\\marin\\.nuget\\packages\\system.security.principal.windows\\4.5.0\\system.security.principal.windows.4.5.0.nupkg.sha512"
+  ],
+  "logs": []
+}
